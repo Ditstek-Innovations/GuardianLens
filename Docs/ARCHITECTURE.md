@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document | Architecture Description |
-| Version | 1.0 |
+| Version | 1.1 |
 | Status | For engineering review |
 | Programme phase | Week 3 — Govern · 8 August 2026 |
 | Owner | Kapil (Engineering) — same owner as [TRD.md](TRD.md), per [GOVERNANCE.md](GOVERNANCE.md) §19.1 |
@@ -128,7 +128,8 @@ These are not quality attributes to be traded off. They are `ABSOLUTE` rules fro
 |---|---|---|
 | Customer's **existing** cameras, unmodified | PRD §1.4, RULE_BOOK §3.1 | The architecture may assume ONVIF Profile S / RTSP and nothing better. Camera readiness is `[OPEN — PRD OQ-2]`. |
 | No inbound network path to the site | NFR-SEC-05, persona P-4 | All site→cloud communication is agent-initiated. See ADR-010. |
-| Single-tenant per site in v1 | RULE_BOOK §3.1 | Isolation is logical, by `site_id` + repository scope filter. See ADR-012. |
+| **Tenant isolation is physical** | ADR-016 | One PostgreSQL database per tenant. A tenant is a customer organisation owning one or more sites. Cross-tenant reach is not filtered — it is unreachable. |
+| Site scoping remains, inside the tenant | RULE_BOOK §3.1 | `site_id` scoping and repository filters still apply *within* a tenant database, because a tenant may own several sites. |
 | PostgreSQL as an enforcement point | TD-005 | The database is not a passive store. Reversing TD-005 removes the guarantee behind quality goal 1. |
 | No labelled site footage exists | PRD OQ-5, AP-2 | No accuracy, latency or volume figure may be asserted (BR-M-01 `[PROPOSED]`). Every such value in this document is `[OPEN]`. |
 
@@ -193,6 +194,7 @@ flowchart TB
 
 | Not in scope | Why | Reference |
 |---|---|---|
+| Cross-tenant reporting, benchmarking or aggregate analytics | Under ADR-016 tenant data is physically separated; producing a cross-tenant view requires an explicit, separately-governed ETL that does not exist and is not planned | §8.9 |
 | Camera supply, installation or replacement | The product attaches to what exists | PRD §1.4 |
 | Video storage or playback | BR-008; the control plane has no decode capability at all | ADR-011 |
 | Worker identity of any kind | BR-006; there is no person entity to attach an identity to | §4.3 |
@@ -285,13 +287,18 @@ flowchart TB
     end
     subgraph CP["TB2 — CONTROL PLANE"]
         API["<b>Control Plane API</b><br/>FastAPI / ASGI<br/><i>ingest · review · config · report</i>"]
+        TR["<b>Tenant Router</b><br/><i>resolve principal → tenant,<br/>bind connection</i>"]
         WRK["<b>Retention Worker</b><br/>scheduled job [V1]"]
-        DB[("<b>PostgreSQL 16</b><br/>system of record<br/>+ enforcement")]
-        OBJ[("<b>Evidence Store</b><br/>filesystem [MVP]<br/>S3-compatible [V1]")]
+        CDB[("<b>Control Database</b><br/><i>tenant registry + routing<br/>NEVER tenant data</i>")]
+        DB1[("<b>Tenant DB — acme</b><br/>PostgreSQL 16<br/>system of record<br/>+ enforcement")]
+        DB2[("<b>Tenant DB — globex</b><br/>PostgreSQL 16<br/>system of record<br/>+ enforcement")]
+        OBJ[("<b>Evidence Store</b><br/>per-tenant prefix<br/>filesystem [MVP] · S3 [V1]")]
         MON["<b>Prometheus<br/>+ Grafana</b>"]
-        API --> DB
+        API --> TR
+        TR --> CDB
+        TR --> DB1 & DB2
         API --> OBJ
-        WRK --> DB
+        WRK --> TR
         WRK --> OBJ
         API -.-> MON
     end
@@ -309,9 +316,11 @@ flowchart TB
 | **Edge Agent** | Connect to cameras, sample, infer, evaluate rules deterministically, build candidates, buffer, publish | Python 3.11, OpenCV/FFmpeg, ONNX Runtime | `[MVP]` |
 | **Edge Store** | Durable outbox for events, gaps and health; frame spool | SQLite 3 + local files — **not a system of record** | `[MVP]` |
 | **Control Plane API** | Authenticate, ingest, serve the queue, apply decisions, configure, report | FastAPI, SQLAlchemy 2 | `[MVP]` |
-| **Retention Worker** | Enforce per-site retention; record every deletion | Python scheduled job, single instance | `[V1]` |
-| **PostgreSQL** | System of record **and** enforcement point for BR-004/005/AU-01/AU-02 | PostgreSQL 16 | `[MVP]` |
-| **Evidence Store** | One still image per event, behind a storage interface | Filesystem → S3-compatible | `[MVP]` → `[V1]` |
+| **Tenant Router** | Resolve the authenticated principal to a tenant, bind the request to that tenant's database, assert the binding is correct before any query runs | In-process middleware + connection registry | `[V1]` |
+| **Retention Worker** | Enforce per-site retention within each tenant; record every deletion | Python scheduled job, single instance, iterates tenants | `[V1]` |
+| **Control Database** | Tenant registry, database routing, per-tenant schema version, tenant lifecycle audit. **Holds no tenant business data** | PostgreSQL 16 | `[V1]` |
+| **Tenant Database** — one per tenant | System of record **and** enforcement point for BR-004/005/AU-01/AU-02, for exactly one tenant | PostgreSQL 16 | `[MVP]` single · `[V1]` many |
+| **Evidence Store** | One still image per event, behind a storage interface, partitioned by tenant | Filesystem → S3-compatible | `[MVP]` → `[V1]` |
 | **Review Web App** | Keyboard-first review, configuration, reporting | React 18 + TS + Vite + Tailwind | `[MVP]` |
 | **Prometheus + Grafana** | Metrics and alerting | Self-hosted in-stack | `[MVP]` basic |
 
@@ -760,6 +769,44 @@ sequenceDiagram
 
 **MVP consequence:** MOD-11 and `retention_policies` are `[V1]`. In `[MVP]` there is **no automated retention enforcement and no mechanism that can set `expired`.** Pilot retention is handled by setting a short period manually and by the pilot's own data agreement (TRD §13.3). BR-009 is an `ACTIVE STRONG` rule with no technical enforcement point at MVP — this is a known, temporary gap and is recorded in §11 R-5 and `AMD-DB-03`.
 
+## 6.9 RS-9 — Schema migration fan-out `[V1]`
+
+**Proves:** that ADR-016's N copies of the rule-bearing constraints stay identical, and that a partial failure is loud rather than silent. This is the runtime counterpart of risk R-9.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant OP as Deploy pipeline
+    participant CDB as Control DB
+    participant T1 as Tenant DB — acme
+    participant T2 as Tenant DB — globex
+    participant AT as FF-11 Attestation
+
+    OP->>CDB: read tenant registry, target schema version
+    OP->>T1: migrate to head (one transaction)
+    T1-->>OP: ok
+    OP->>CDB: record acme schema_version = head
+    OP->>T2: migrate to head
+    T2--xOP: FAILURE — migration aborted, tenant on previous version
+    OP->>CDB: record globex schema_version = previous, state = 'drifted'
+    OP->>CDB: mark globex suspended from binding
+    Note over CDB: A drifted tenant is SUSPENDED,<br/>not merely alerted. Serving traffic<br/>from a database whose constraints<br/>are unverified is the failure<br/>ADR-016 exists to prevent.
+    OP->>AT: attest all active tenants
+    AT->>T1: verify every §6.6 constraint + trigger present and enabled
+    T1-->>AT: pass
+    AT-->>OP: acme active · globex suspended, requires intervention
+```
+
+| Property | Statement |
+|---|---|
+| **Per-tenant transaction** | Each tenant migrates in its own transaction. One tenant's failure never leaves another partially migrated |
+| **Version recorded centrally** | The control database holds each tenant's schema version, so drift is queryable rather than discovered |
+| **Drift suspends, not alerts** | A tenant behind head is refused binding. Serving a database whose rule enforcement is unverified is worse than serving an error |
+| **Attestation is independent of migration** | FF-11 verifies the *presence of constraints*, not the *success of a migration*. A migration that reports success and a database that lacks a trigger are different facts, and only the second one matters |
+| **Application must tolerate both versions** | Expand/contract ([DATABASE.md](DATABASE.md) §13.2) is mandatory, not advisory, because during any fan-out the fleet is genuinely mixed-version |
+
+> **The temptation to resist:** letting a drifted tenant keep serving because "it is only one migration behind, and suspending a paying customer is drastic". Whether that is safe depends entirely on which migration it is — and the team making that judgement under pressure is exactly the erosion GOVERNANCE §8 exists to prevent. The rule is mechanical: **behind head, or failing attestation, means suspended.**
+
 ---
 
 # 7. Deployment View
@@ -798,6 +845,8 @@ flowchart TB
 | Backup | Nightly database dump to a separate volume | Single-host failure loses at most one day; acceptable for pilot, **not** for `[V1]` |
 | TLS | Self-signed or internal CA on the LAN | Browser trust must be configured per site — a real onboarding cost (PRD P-06) |
 
+**Tenancy at `[MVP]`.** The pilot is one tenant with one site, so the single-node stack runs the control database and exactly one tenant database — provisioned by the same code path a hundredth tenant would use (ADR-016). The Tenant Router is present and binding is asserted even though there is only one target, because a router exercised for the first time at tenant two is a router that has never been tested.
+
 > **The MVP topology is not a scaled-down production system; it is a different system.** It has no network partition between planes, so RS-2 cannot occur naturally and must be tested with a synthetic fault (TRD §19.5). Treating pilot stability as evidence of production resilience would be a category error.
 
 ## 7.2 Production — distributed `[V1]`
@@ -812,33 +861,41 @@ flowchart TB
     end
     subgraph CLOUD["Control Plane — cloud or customer DC — TB2"]
         LB["Load Balancer<br/>TLS 1.3 termination · WAF"]
-        A1["API instance 1"]
-        A2["API instance 2"]
-        RW["Retention Worker<br/><i>single, leader-elected</i>"]
-        DB[("Managed PostgreSQL 16<br/>primary + PITR")]
-        RR[("Read replica<br/><i>reporting only</i>")]
-        OBJ[("S3-compatible<br/>+ lifecycle policy")]
-        SEC["Secret store / KMS"]
+        A1["API instance 1<br/>+ Tenant Router"]
+        A2["API instance 2<br/>+ Tenant Router"]
+        RW["Retention Worker<br/><i>single, leader-elected,<br/>iterates tenants</i>"]
+        CDB[("<b>Control DB</b><br/>registry · routing ·<br/>schema versions")]
+        SEC["Secret store / KMS<br/><i>per-tenant DB credentials</i>"]
+        subgraph TEN["Tenant databases — one per customer organisation"]
+            DB1[("acme<br/>PostgreSQL 16<br/>+ PITR")]
+            DB2[("globex<br/>PostgreSQL 16<br/>+ PITR")]
+        end
+        OBJ[("S3-compatible<br/>per-tenant prefix<br/>+ lifecycle policy")]
         MON["Prometheus · Grafana · Loki"]
     end
     EA1 & EA2 -->|"HTTPS outbound only"| LB
     USER["Reviewers"] -->|HTTPS + JWT| LB
     LB --> A1 & A2
-    A1 & A2 --> DB
-    A1 & A2 --> OBJ
-    A1 & A2 -.-> RR
+    A1 & A2 --> CDB
     A1 & A2 --> SEC
-    RW --> DB & OBJ
+    A1 & A2 --> DB1 & DB2
+    A1 & A2 --> OBJ
+    RW --> CDB
+    RW --> DB1 & DB2
+    RW --> OBJ
     A1 & A2 & RW -.-> MON
 ```
+
+> Site A and Site B above may belong to the **same** tenant or to different ones. Sites of one tenant share that tenant's database; sites of different tenants share nothing at all.
 
 | Node | Scaling | Constraint |
 |---|---|---|
 | Edge agent | Per site; add agents per camera group. Share nothing. | Cameras per device `[OPEN — PRD OQ-9]` — benchmark, never assume |
-| API | Stateless; add instances | None material — the workload is I/O-bound |
-| PostgreSQL | Single write primary; read replica for reporting | Write volume across many sites is the eventual limit → sharding by site `[V2+]` |
-| Retention Worker | **Exactly one instance**, leader-elected | Concurrent deletion is not desirable; it also makes deletion auditing racy |
-| Evidence store | Independent | Growth is bounded only by retention enforcement |
+| API + Tenant Router | Stateless; add instances | None material — the workload is I/O-bound. Each instance holds per-tenant pools, so **connection count grows with instances × tenants** |
+| Control DB | Single small instance; read-mostly, heavily cached | Availability-critical — if routing is unavailable, **every** tenant is unavailable. Highest-value target (T-20) |
+| Tenant DB | One per tenant; each a single write primary, optional read replica | **Connection ceiling, not write volume, is the binding limit** ([DATABASE.md](DATABASE.md) §17.3). Beyond that: dedicated clusters per tenant cohort |
+| Retention Worker | **Exactly one instance**, leader-elected, iterating tenants | Concurrent deletion is not desirable; per-tenant runs must not let one slow tenant starve the rest |
+| Evidence store | Independent; per-tenant prefix with its own access policy | Growth bounded only by retention enforcement |
 
 ## 7.3 Network flows
 
@@ -880,6 +937,7 @@ Deferred entirely to **[DATABASE.md](DATABASE.md)**, which is normative for the 
 | **TB2** | Control plane | Agent → API; API → data stores | Verified records, audit log, evidence frames, user credentials |
 | **TB3** | User browser | Browser → API | Session token, queue contents, evidence frames |
 | **TB4** | Operator / supply chain | Deploy, dependencies, images, migrations | Everything — this boundary crosses the other three |
+| **TB5** | **Between tenants** `[V1]` | Router binding; control database; shared cluster resources | One customer organisation's entire safety record. **Physical under ADR-016** — the boundary is a database boundary, not a filter |
 
 ### 8.2.2 STRIDE per boundary
 
@@ -901,6 +959,10 @@ Deferred entirely to **[DATABASE.md](DATABASE.md)**, which is normative for the 
 | T-14 | TB4 | **T** | Malicious or vulnerable dependency; unsigned image | Dependency scanning, pinned versions, secret scanning, Bandit/Semgrep every CI run (TRD §12.8); signed images `[V1]` | Accepted at `[MVP]`; image signing is a `[V1]` commitment |
 | T-15 | TB4 | **T** | Migration silently drops a rule-enforcing constraint | T2/T3 change control ([GOVERNANCE.md](GOVERNANCE.md) §8.2); bypass suite must pass **unmodified**; suite and code may not change in one PR | Strong — this is the cheapest control in the system and the easiest to lose |
 | T-16 | TB4 | **E** | Prohibited capability enters the dependency graph | Fitness function FF-5 asserts the denylist in CI (ADR-011) | Requires the denylist to be maintained; a novel library name evades it |
+| T-17 | TB5 | **E/I** | A request is bound to the wrong tenant's database — stale registry cache, recycled connection, or a restore into the wrong target | Per-tenant pools; `tenant_identity` assertion on every connection acquisition (§8.9.1); mismatch aborts and quarantines the pool | Real **only if the assertion is skipped for latency**. FF-12 |
+| T-18 | TB5 | **T** | A tenant database is provisioned by hand, or left half-migrated after a failed fan-out, without the full §6 constraint set — so BR-004/BR-005 are unenforced **for that tenant** | Provisioning is code-only, never manual; FF-11 continuous attestation gates a tenant to `active` | **The defining new risk of ADR-016.** See §8.2.3 and R-9 |
+| T-19 | TB2 | **I** | The global email→tenant lookup permits enumeration of which organisations are customers, and which addresses exist | Generic authentication errors and rate limiting (TRD §12.7); the directory stores a hash of the normalised email, not the address ([DATABASE.md](DATABASE.md) §1.5) | **Real and irreducible** while login is by email alone. Tenant-code login removes it entirely — see R-10 |
+| T-20 | TB4 | **E** | Control-database compromise yields the routing map for every tenant | Control DB holds routing only, never business data (ADR-017); **per-tenant database credentials live in the secret store, not in the control DB**, so the registry alone does not grant access | The control DB becomes the highest-value single target in the system. Accepted with the credential split |
 
 ### 8.2.3 Two findings worth escalating
 
@@ -908,6 +970,7 @@ Deferred entirely to **[DATABASE.md](DATABASE.md)**, which is normative for the 
 |---|---|---|
 | **T-12 — audit integrity depends on nobody having database superuser** | Quality goal 1 is *auditability*, and the product's value proposition is a defensible record. Against an insider with database administration rights, the current design offers deterrence, not evidence. | `[V1]`: hash-chain `audit_log` rows (each row carries the hash of the previous), and replicate the chain head off-box daily. Neither is expensive. Raise as an ADR before G7. |
 | **T-04 — no anomaly detection on agent event volume** | A stolen agent credential produces plausible events indefinitely. The damage is reviewer capacity — which [TRD.md](TRD.md) §18.3 identifies as the binding constraint on the whole product. | Alert on per-agent event rate deviating from its own trailing baseline. Cheap, and it also catches a misconfigured rule, which is the far more likely cause. |
+| **T-18 — rule enforcement is now N copies, not one** | Under ADR-016 every tenant database carries its own copy of the CHECK constraints and triggers that make BR-004 and BR-005 structural. The product's central guarantee is therefore only as strong as the **weakest tenant's schema**, and a half-migrated tenant is invisible unless something looks. | FF-11: continuously attest, in production, that every `active` tenant database holds every constraint and trigger in [DATABASE.md](DATABASE.md) §6.6. A tenant failing attestation is suspended from binding, not merely alerted. **This is a release condition for ADR-016, not a follow-up.** |
 
 ## 8.3 Identity, sessions and key management
 
@@ -970,7 +1033,63 @@ Channels, formats and prohibitions are [TRD.md](TRD.md) §15–§16 and are not 
 
 See **ADR-007**. Summary: `occurred_at` comes from the edge clock and is what the reviewer is shown; `received_at` comes from the control plane and is what ordering and retention use. Both are stored, both are `TIMESTAMPTZ`, and a skew beyond tolerance is an alertable condition rather than a silent correction. Display is in the **site's** IANA timezone, not the viewer's (NFR-L-02).
 
-## 8.9 Configuration management
+## 8.9 Tenancy and connection routing
+
+Per **ADR-016**, isolation is physical. This section defines how a request reaches the right database and — more importantly — how it is prevented from reaching the wrong one.
+
+### 8.9.1 Request binding
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client (browser or agent)
+    participant MW as MOD-12 Identity
+    participant TR as Tenant Router
+    participant CDB as Control DB
+    participant TDB as Tenant DB
+
+    C->>MW: request + credential / token
+    MW->>MW: validate; extract tenant claim
+    MW->>TR: bind(tenant_id)
+    TR->>CDB: resolve tenant_id → connection target
+    Note over CDB: registry is cached;<br/>cache is invalidated on<br/>tenant lifecycle events
+    TR->>TDB: acquire connection from that tenant's pool
+    TR->>TDB: SELECT tenant_id FROM tenant_identity
+    alt identity matches the bound tenant
+        TR-->>MW: bound
+        MW->>TDB: execute request
+    else mismatch
+        TR->>TR: ABORT · alert · quarantine the pool
+        Note over TR: A mis-routed connection is a<br/>P1 incident, never a retry
+    end
+```
+
+**Step 7 is the control that matters.** Every tenant database contains a single-row `tenant_identity` table naming the tenant it belongs to ([DATABASE.md](DATABASE.md) §1.4). The router asserts that the connection it just acquired is the tenant it intended, *before* executing anything. Without this assertion, a misconfigured registry row, a stale cache, a recycled pool or a restore into the wrong target writes one customer's events into another customer's database — and nothing would notice, because in a silo model there is no `tenant_id` column on the rows to contradict it.
+
+### 8.9.2 Rules
+
+| Rule | Statement |
+|---|---|
+| **One tenant per request** | A request is bound to exactly one tenant before any query. There is no unbound state in which a query can run |
+| **No connection spans tenants** | Connection pools are per-tenant. A pooled connection is never handed to a request bound to a different tenant |
+| **The tenant claim is server-derived** | Resolved from the authenticated principal, never from a header, path or body parameter — the same discipline as BR-S-01 applied to tenancy |
+| **The control database is read-mostly and holds no business data** | ADR-017. It cannot become a shadow copy of tenant data |
+| **Identity assertion before use** | §8.9.1 step 7, on every connection acquisition |
+| **Agents are tenant-bound at registration** | An agent credential resolves to exactly one tenant and one site. A compromised agent cannot address another tenant |
+
+### 8.9.3 Tenant lifecycle
+
+| Phase | Action | Audited in |
+|---|---|---|
+| **Provision** | Create database → migrate to head → seed roles → write `tenant_identity` → register in control DB → create evidence prefix → bootstrap admin | Control DB tenant audit |
+| **Verify** | FF-11 attestation must pass before the tenant is marked `active` and can accept traffic | Control DB |
+| **Suspend** | Registry marks the tenant suspended; router refuses binding. **Data untouched** | Control DB |
+| **Export** | Per-tenant dump + evidence prefix export | Both |
+| **Deprovision** | Final export → `DROP DATABASE` → remove evidence prefix → retain the tenant registry row and its audit as a tombstone | Control DB |
+
+> **The tombstone matters.** Deleting the registry row along with the database would erase the record that the tenant ever existed, including the audited fact of the deletion itself. The tenant row is retained with a `deleted_at`; the *data* is gone, the *fact of deletion* is not. This is BR-009's "every deletion is recorded" applied one level up.
+
+## 8.10 Configuration management
 
 | Property | Value |
 |---|---|
@@ -1003,10 +1122,12 @@ The TRD's Technical Decisions Register (TD-001…TD-017) is the **seed set** and
 | **ADR-009** | The edge agent has one explicit operating-state machine | Accepted | §9.5 below |
 | **ADR-010** | No inbound path to the customer site, ever | Accepted | §9.6 below |
 | **ADR-011** | Prohibited capabilities are enforced by a CI fitness function, not by review | Accepted | §9.7 below |
-| **ADR-012** | Multi-site isolation is logical, not physical | Accepted | §9.8 below |
+| **ADR-012** | Multi-site isolation is logical, not physical | **Superseded by ADR-016** | §9.8 below |
 | **ADR-013** | Evidence presence is a precondition of a decision | **Proposed** — needs PRD confirmation | §9.9 below |
-| **ADR-014** | Event identity is client-generated and time-ordered | Accepted | [DATABASE.md](DATABASE.md) |
-| **ADR-015** | Audit integrity is chained and replicated off-box `[V1]` | **Proposed** — raised by T-12 | [DATABASE.md](DATABASE.md) |
+| **ADR-014** | Event identity is client-generated and time-ordered | Accepted | [DATABASE.md](DATABASE.md) §3.4 |
+| **ADR-015** | Audit integrity is chained and replicated off-box `[V1]` | **Proposed** — raised by T-12 | [DATABASE.md](DATABASE.md) §10.2 |
+| **ADR-016** | **Tenant isolation is physical: one database per tenant** | Accepted | §9.10 below |
+| **ADR-017** | The control database holds routing only, never tenant data | Accepted | [DATABASE.md](DATABASE.md) §1.4 |
 
 ## 9.3 ADR-007 — Time authority
 
@@ -1089,7 +1210,7 @@ Skew is measured on every health beat as `received_at − sent_at`. Beyond toler
 
 ## 9.8 ADR-012 — Multi-site isolation is logical, not physical
 
-**Status:** Accepted.
+**Status: SUPERSEDED by ADR-016 (§9.10).** Retained in full, per [GOVERNANCE.md](GOVERNANCE.md) §8.5 — a superseded ADR is marked superseded, never deleted, so a receiving team can see what was decided and why it changed. **Site-level scoping described below remains in force *within* a tenant database**; only the claim that tenant isolation is logical is superseded.
 
 **Context.** [RULE_BOOK.md](RULE_BOOK.md) §3.1 defines a site as single-tenant in v1. `[V1]` serves multiple sites from one control plane. Physical isolation (database per customer) is the strongest option and the most expensive to operate with five people.
 
@@ -1113,6 +1234,45 @@ Skew is measured on every health beat as `received_at − sent_at`. Beyond toler
 - Evidence retrieval sits on the critical path for reviewer latency (quality goal 3), which raises the importance of §10.2 QS-3.
 - A site that disables evidence transport gets a materially weaker record. That is the customer's decision to make knowingly — it should not be discoverable only by noticing blank frames.
 - **Needs PRD confirmation**, because "may a reviewer decide with no evidence?" is a product question, not an architecture question.
+
+## 9.10 ADR-016 — Tenant isolation is physical: one database per tenant
+
+**Status:** Accepted. **Supersedes ADR-012.**
+
+**Context.** ADR-012 chose logical isolation: one database, scoping by `site_id`, enforced at the repository layer. That is the cheapest option to operate and it is what a five-person team can carry ([GOVERNANCE.md](GOVERNANCE.md) §2). Its stated consequence was that *"cross-site data exposure becomes a single-defect risk rather than an impossibility"* — one missing filter, one mis-scoped join, one reporting query written against the wrong repository, and one customer's safety records are visible to another.
+
+That residual is acceptable when every deployment is a separate installation. It stops being acceptable the moment one control plane serves more than one **buying organisation**, because the failure is no longer "a manager saw another plant of their own company" but "a competitor saw our safety violations". For this product the exposed asset is a catalogue of a customer's own safety failures, attributed to named reviewers — the most commercially sensitive record the customer possesses, and the one they were most reluctant to let leave the site in the first place (persona P-4, BR-008).
+
+**Decision.** **One PostgreSQL database per tenant**, where a **tenant is a customer organisation** owning one or more sites.
+
+| Element | Decision |
+|---|---|
+| Tenant unit | Customer organisation. A tenant owns 1..N sites; a site belongs to exactly one tenant |
+| Isolation | **Physical.** Separate database per tenant, separate credentials, separate backup and restore |
+| Control database | A separate database holding the tenant registry, routing and per-tenant schema version. **No tenant business data** — ADR-017 |
+| Request binding | Every request is bound to exactly one tenant database by the Tenant Router before any query executes (§8.9) |
+| Site scoping | **Retained, inside the tenant.** A tenant with several sites still scopes by `site_id` and by role |
+| Evidence store | Partitioned by tenant prefix, with per-tenant access policy |
+| Cross-tenant queries | **Structurally impossible.** No connection spans two tenant databases |
+
+**Consequences — the honest ledger.**
+
+*What gets better:*
+- Cross-tenant exposure ceases to be a defect class. There is no filter to forget, because there is no shared table to filter. This is the same reasoning that puts BR-004's strongest enforcement in a CHECK constraint rather than in application code (§4.2).
+- Per-tenant restore, export and **deletion** become clean operations. "Delete everything you hold about us" is `DROP DATABASE` plus evidence-prefix removal, which is a far stronger answer than a cascading delete across shared tables — and a materially better position under DPDP/GDPR-style erasure obligations.
+- A tenant can be relocated to its own cluster, or to a customer-hosted one, without a code change. The customer who demands full physical separation is now a configuration case rather than a separate deployment.
+- Noisy-neighbour and per-tenant sizing become tractable.
+
+*What gets worse, and by how much:*
+- **Migrations fan out.** Every schema change runs N times and can partially fail, leaving tenants on different schema versions. This is the single largest new risk (R-9) and the reason FF-11 exists.
+- **Operational surface multiplies** — N backup schedules, N restore drills, N connection pools, N monitoring targets. This runs directly against [GOVERNANCE.md](GOVERNANCE.md) §2's five-person constraint and is the same objection that rejected Kubernetes in TD-012. It is accepted deliberately here because the asset being protected is different in kind.
+- **Connection count becomes the scaling ceiling**, not query throughput. N tenants × pool size against one cluster's `max_connections` binds long before write volume does ([DATABASE.md](DATABASE.md) §17.3).
+- **Cross-tenant reporting is gone.** Product analytics, fleet benchmarking and "how does our acceptance rate compare" are not available without a separately-governed ETL, which does not exist and is out of scope (§3.3).
+- **Authentication needs a global lookup**, because a login by email must resolve to a tenant before any tenant database is opened. That lookup is the one place where a cross-tenant surface necessarily exists, and it is designed and threat-modelled explicitly in [DATABASE.md](DATABASE.md) §1.5 and threat T-19.
+
+> **The property that must not be lost.** BR-004 and BR-005 are enforced by constraints and triggers in the database. Under ADR-012 there was **one** copy of that enforcement. Under ADR-016 there are **N**, and the guarantee is only as strong as the weakest tenant's schema. A tenant provisioned by hand, or left half-migrated after a failed fan-out, can hold a database in which a verified record without a reviewer is insertable. **This is the most important consequence in this ADR** and it is why FF-11 — continuous per-tenant constraint attestation in production, not merely at migration time — is not optional.
+
+**`[MVP]` position.** The pilot has one tenant and one site. The pilot therefore runs a single tenant database plus the control database, provisioned by the same code path a hundredth tenant would use. **Provisioning is never a manual step, even for the first tenant** — a hand-built tenant is precisely the schema-drift risk above, arriving on day one.
 
 ---
 
@@ -1159,11 +1319,15 @@ flowchart LR
 
 ATAM terminology: a **sensitivity point** is where one decision strongly determines one quality attribute; a **tradeoff point** is where a decision moves two attributes in opposite directions. Tradeoff points are where architecture arguments actually happen, so they are named in advance.
 
+> **Note on identifiers.** This table uses single-digit `S-n` and `T-n`. The threat IDs in §8.2 are always **two-digit** `T-01`…`T-20`. `T-4` is a tradeoff point; `T-04` is a threat. They are different registers and are never cross-referenced by number alone.
+
 | ID | Type | Point | Affects | Note |
 |---|---|---|---|---|
 | **S-1** | Sensitivity | TD-002 split plane | BR-008 compliance; reviewer latency; deployability | Reversing it breaks BR-008 as a *topological* guarantee and reduces it to policy. Highest-cost reversal in the system. |
 | **S-2** | Sensitivity | TD-005 PostgreSQL as an enforcement point | Quality goal 1 | Any datastore change removes defence layer 4 (§4.2). T3 by definition. |
-| **S-3** | Sensitivity | Repository-level scope filtering | Cross-site isolation (ADR-012) | The single layer standing between a controller bug and a cross-customer leak. |
+| **S-3** | Sensitivity | Repository-level scope filtering | Cross-**site** isolation *within* a tenant (ADR-012, still in force at that level) | Since ADR-016 this no longer stands between two customers — only between two sites of the same customer. Its consequence is materially reduced. |
+| **S-4** | Sensitivity | Tenant binding + `tenant_identity` assertion (§8.9.1) | Cross-**tenant** isolation | Replaces S-3 as the layer that matters. It is a single assertion, executed per connection acquisition, and it is the entire runtime guarantee behind ADR-016. Removing it "for latency" would silently reduce physical isolation to hopeful isolation. |
+| **T-7** | **Tradeoff** | Database-per-tenant (ADR-016) | Isolation strength ↕ operational burden and cross-tenant capability | Buys physical isolation and clean per-tenant erasure; costs N migrations, N backups, connection-count ceiling, and all cross-tenant reporting. Accepted knowingly — see the ledger in §9.10. |
 | **T-1** | **Tradeoff** | Evidence frame transport on/off | Privacy (BR-008) ↕ record quality and reviewer confidence | Off maximises privacy and produces a weaker record. Must be the customer's informed choice — ADR-013. |
 | **T-2** | **Tradeoff** | Sample rate (default 2 fps) | Inference cost / cameras per device ↕ probability of observing a brief exception | Higher rate finds more and costs linearly more. Closure needs OQ-9 and OQ-4 together. |
 | **T-3** | **Tradeoff** | Confidence threshold | Reviewer load ↕ missed exceptions | **The product's central tension** (RULE_BOOK §8.1: BR-004 vs P-01). Resolution is *fewer and better candidates*, never a weaker gate. Raising the threshold to protect reviewers is a safety decision, not a tuning decision. |
@@ -1186,8 +1350,10 @@ Executable checks that keep the architecture true over time. Each runs in CI; ea
 | **FF-6** | Outbound-integration static analysis (`NoActionGuard`) | Any HR/performance/disciplinary client or configurable outbound webhook exists | BR-003 |
 | **FF-7** | Report-filter query-builder test | A report query omits `status IN ('accepted','corrected')` | BR-R-01 |
 | **FF-8** | Clean-instance test | A freshly provisioned site has any active rule or emits any event | BR-001 |
-| **FF-9** | Cross-site read attempt | A scoped principal can read another site's events or evidence | ADR-012, S-3 |
+| **FF-9** | Cross-site read attempt | A scoped principal can read another site's events or evidence **within their tenant** | ADR-012, S-3 |
 | **FF-10** | Idempotent-ingest replay test | Re-submitting a delivered batch creates a duplicate row | QS-5 |
+| **FF-11** | **Per-tenant constraint attestation** — enumerate every `active` tenant database and verify every constraint, trigger and index in [DATABASE.md](DATABASE.md) §6.6 is present and enabled | Any tenant is missing any rule-bearing constraint or trigger, or is behind the target schema version | **T-18, R-9, BR-004, BR-005, BR-AU-01.** Runs in CI **and continuously in production** — a tenant failing attestation is suspended from binding |
+| **FF-12** | **Tenant-binding test** — attempt a request bound to tenant A against a connection to tenant B; attempt an unbound query | The mis-bound query executes, or an unbound query is possible at all | T-17, S-4, ADR-016 |
 
 > **FF-1 and the rest are never modified in the same change as the code they constrain** ([GOVERNANCE.md](GOVERNANCE.md) §8.2). A pull request touching both is automatically T3 and must be split.
 
@@ -1207,6 +1373,9 @@ Engineering risks are [TRD.md](TRD.md) §21 and technical debt is §22; neither 
 | **R-6** | No anomaly detection on per-agent event volume (T-04) | A stolen credential or a misconfigured rule consumes reviewer capacity invisibly | Medium — misconfiguration is far likelier than theft | Alert on deviation from each agent's own trailing baseline |
 | **R-7** | Self-signed or internal-CA TLS at `[MVP]` requires per-site browser trust configuration | Onboarding friction, feeding QS-7 and PRD P-06 | Certain at `[MVP]` | Document as an onboarding step and measure its cost during pilot; it is part of the answer to "software or services?" |
 | **R-8** | Pilot topology has no inter-plane network partition, so RS-2 never occurs naturally | False confidence in resilience carried into `[V1]` | Medium | Fault injection is mandatory in CI and in UAT (TRD §19.5); pilot stability is **not** evidence of production resilience |
+| **R-9** | **Schema drift across tenant databases** (T-18). A migration fan-out partially fails, or a tenant is provisioned outside the code path, and that tenant's database lacks a rule-bearing constraint | **The highest-impact risk introduced by ADR-016.** BR-004/BR-005 silently unenforced for one customer, discovered only when a record with no reviewer appears | Medium and rising with tenant count | FF-11 continuous attestation gating `active` status; provisioning is code-only; migration fan-out is transactional per tenant with a recorded per-tenant schema version ([DATABASE.md](DATABASE.md) §13.5) |
+| **R-10** | **The email→tenant directory is an enumeration surface** (T-19), and the control database is now the highest-value single target (T-20) | Discloses which organisations are customers — commercially sensitive in a market this small | Medium | Store a hash of the normalised email, not the address; generic auth errors; rate limiting. **The complete fix is tenant-code login**, which removes the global lookup entirely — raise before the second paying tenant |
+| **R-11** | **Operational load scales linearly with tenants** against a five-person team ([GOVERNANCE.md](GOVERNANCE.md) §2) | Backups untested, migrations deferred, attestation muted — the controls above decay exactly when tenant count makes them matter most | **High** | Every per-tenant operation must be automated before the second tenant, not after. A manual step performed twice becomes a manual step performed never |
 
 ### Architecture-level debt accepted deliberately
 
@@ -1235,6 +1404,11 @@ The normative vocabulary is [RULE_BOOK.md](RULE_BOOK.md) §3.1 (terms) and §3.2
 | **Bounded staleness** | Configuration is eventually consistent within a known maximum delay |
 | **Negative architecture** | Properties held by the deliberate absence of a component, field or route (§4.3) |
 | **Last-known-good** | The configuration or artefact retained when a new one fails validation |
+| **Tenant** | A customer organisation. Owns one or more Sites, and has exactly one database (ADR-016). Distinct from *Site*, which remains the physical-location concept defined in [RULE_BOOK.md](RULE_BOOK.md) §3.1 |
+| **Silo model** | The SaaS isolation tier in which each tenant has dedicated infrastructure — here, a dedicated database. Contrasted with *pool* (shared tables) and *bridge* (shared database, separate schemas) |
+| **Control database** | The registry and routing store. Holds which tenants exist and where their databases are; holds no tenant business data (ADR-017) |
+| **Tenant binding** | Resolving an authenticated principal to exactly one tenant and attaching the request to that tenant's database before any query runs (§8.9) |
+| **Fan-out migration** | A schema change applied to every tenant database in turn, with per-tenant success or failure recorded (§13.5 of [DATABASE.md](DATABASE.md)) |
 
 ---
 
@@ -1285,6 +1459,9 @@ The normative vocabulary is [RULE_BOOK.md](RULE_BOOK.md) §3.1 (terms) and §3.2
 | **BR-D-03** `[P]` | **MOD-3 contains no inference** — the IF-E2 boundary | — | — | Code review of the deterministic path |
 | **BR-M-01** `[P]` | — | — | — | **None possible.** Named approver on every outbound artefact ([GOVERNANCE.md](GOVERNANCE.md) §6.4) |
 | **BR-P-02** `[P]` | — | — | — | **None possible.** Gate G3 |
+| **All of the above, per tenant** | — | Tenant Router binds before any query; `tenant_identity` asserted per connection | **Every constraint and trigger exists in N databases** — one per tenant | **FF-11 attestation** · FF-12 binding test |
+
+> **The final row is the one ADR-016 adds, and it changes how this table must be read.** Every data-layer enforcement point above is now replicated once per tenant. The matrix describes what *should* be true in each tenant database; only FF-11 establishes that it *is* true in all of them.
 
 `[P]` = `PROPOSED`; carries no force until ratified ([RULE_BOOK.md](RULE_BOOK.md) §10).
 
@@ -1315,6 +1492,7 @@ Nothing here is resolved by assumption. Per [GOVERNANCE.md](GOVERNANCE.md) G-5, 
 | Version | Date | Change | Author | Reviewed by |
 |---|---|---|---|---|
 | 1.0 | 2026-08-08 | Initial architecture description. arc42 structure, C4 levels 1–3, eight runtime scenarios, STRIDE threat model, ADR-007…ADR-013, quality scenarios and fitness functions. Ten proposed TRD amendments in Appendix A. | — | — |
+| 1.1 | 2026-08-12 | **Isolated multi-tenancy.** ADR-012 superseded by **ADR-016** (database per tenant; tenant = customer organisation) and **ADR-017** (control database holds routing only). New §8.9 tenancy and connection routing; new RS-9 migration fan-out; trust boundary TB5 and threats T-17…T-20; sensitivity S-4 and tradeoff T-7; fitness functions FF-11 attestation and FF-12 binding; risks R-9…R-11; container, deployment and glossary updates. TRD §2, §8–9, §13, §18 updated in place by the owner. | — | Kapil (owner) |
 
 # Sign-off
 

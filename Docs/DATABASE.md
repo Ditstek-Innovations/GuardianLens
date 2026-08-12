@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document | Database Design Specification |
-| Version | 1.0 |
+| Version | 1.1 |
 | Status | For engineering review |
 | Programme phase | Week 3 — Govern · 8 August 2026 |
 | Owner | Kapil (Engineering) — same owner as [TRD.md](TRD.md), per [GOVERNANCE.md](GOVERNANCE.md) §19.1 |
@@ -63,19 +63,25 @@ flowchart LR
         S2[("<b>Frame Spool</b><br/>local files<br/><i>pending evidence</i>")]
     end
     subgraph CP["Control plane — TB2"]
-        S3[("<b>PostgreSQL 16</b><br/><i>system of record<br/>+ enforcement point</i>")]
-        S4[("<b>Evidence Store</b><br/>filesystem [MVP]<br/>S3-compatible [V1]")]
+        SC[("<b>Control Database</b><br/><i>tenant registry · routing ·<br/>schema versions</i><br/><b>no tenant data</b>")]
+        subgraph TEN["TB5 — one database per tenant"]
+            S3[("<b>Tenant DB — acme</b><br/>PostgreSQL 16<br/><i>system of record<br/>+ enforcement point</i>")]
+            S3b[("<b>Tenant DB — globex</b><br/>PostgreSQL 16")]
+        end
+        S4[("<b>Evidence Store</b><br/>per-tenant prefix<br/>filesystem [MVP] · S3 [V1]")]
         S5[("<b>Prometheus TSDB</b><br/><i>metrics — never a record</i>")]
     end
     S1 -->|"published, then reclaimed"| S3
     S2 -->|"uploaded, then deleted"| S4
     S3 -.->|"evidence_ref"| S4
+    SC -.->|"routes to"| S3 & S3b
 ```
 
 | Store | Role | System of record? | Retention authority |
 |---|---|---|---|
-| **PostgreSQL 16** | Events, decisions, configuration, identity, audit | **Yes — the only one** | `retention_policies` per site (§9) |
-| **Evidence Store** | One still image per event | No — the row is the record; the frame is an attachment | Same policy, independently shorter window permitted |
+| **Tenant database** — one per tenant | Events, decisions, configuration, identity, audit **for exactly one customer organisation** | **Yes — the only one** | `retention_policies` per site, within the tenant (§9) |
+| **Control database** | Tenant registry, routing, per-tenant schema version, tenant lifecycle audit | **No.** Holds no business data — ADR-017 (§1.4) | Registry rows are retained as tombstones after deprovisioning |
+| **Evidence Store** | One still image per event, under a per-tenant prefix | No — the row is the record; the frame is an attachment | Same policy, independently shorter window permitted |
 | **Edge Store (SQLite)** | Durable outbox for events, gaps, health | **No.** A buffer. Rows are deleted once published | Bounded by disk quota, not by time (§11) |
 | **Prometheus TSDB** | Operational metrics | **No, and never.** A metric is never evidence | Local retention, operational only |
 
@@ -98,13 +104,96 @@ This is BR-008 and BR-P-01 `[PROPOSED]` expressed as a column list rather than a
 
 ---
 
+## 1.3 Tenancy topology
+
+Per **ADR-016** ([ARCHITECTURE.md](ARCHITECTURE.md) §9.10), isolation between customers is **physical**: one PostgreSQL database per tenant, where a **tenant is a customer organisation** owning one or more sites.
+
+```
+control database                       ← registry and routing only
+  ├── tenants
+  ├── tenant_databases
+  ├── tenant_schema_versions
+  ├── user_directory                   ← email hash → tenant, for login routing
+  └── control_audit_log
+
+tenant database "acme"                 ← the full schema in §5, once
+  ├── tenant_identity  (single row)    ← the anti-misrouting assertion
+  ├── sites, cameras, zones, detection_rules
+  ├── events, event_corrections, coverage_gaps
+  ├── users, roles, user_roles, agents
+  ├── model_versions
+  └── audit_log
+
+tenant database "globex"               ← the same schema, independently
+  └── …
+```
+
+| Property | Consequence |
+|---|---|
+| The database **is** the tenant scope | **No `tenant_id` column appears on any business table.** Adding one would create a way to get scoping wrong in a place where it currently cannot be wrong |
+| `site_id` scoping is retained **inside** the tenant | A tenant with three plants still scopes by site and by role. ADR-012 remains in force at that level |
+| A join across tenants cannot be written | There is no connection that spans two tenant databases |
+| Per-tenant erasure is `DROP DATABASE` | Plus evidence-prefix removal. A far stronger answer to an erasure request than a cascading delete |
+| Every rule-bearing constraint exists **N times** | §6 is replicated once per tenant. **This is the single most important consequence** — see §13.5 and FF-11 |
+
+> **The trap this topology creates.** Under a shared schema there was one copy of the CHECK constraints and triggers that make BR-004 and BR-005 structural. There are now N, and the guarantee is only as strong as the weakest tenant's database. A tenant provisioned by hand, or left half-migrated after a failed fan-out, is a database in which a verified record with no reviewer is insertable — and nothing surfaces that fact unless something is looking. Fitness function **FF-11** is what looks, and it runs continuously in production, not only at migration time.
+
+## 1.4 The control database — ADR-017
+
+**Status:** Accepted. Register: [ARCHITECTURE.md](ARCHITECTURE.md) §9.2.
+
+**Context.** Database-per-tenant requires a place to record which tenants exist and where their databases are. That store is reachable from every request, which makes it the natural place to also cache "just a little" tenant data — a display name, a site count, a last-login. Each such addition is individually harmless and collectively rebuilds a shared, cross-tenant copy of exactly the data ADR-016 separated.
+
+**Decision.** The control database holds **routing, lifecycle and operational state only.**
+
+| Permitted | Forbidden |
+|---|---|
+| Tenant identity, slug, status, timestamps | Any event, decision, reviewer attribution or audit entry |
+| Database connection target and credential **reference** (never the credential) | Any camera, zone, rule or site configuration |
+| Per-tenant schema version and attestation result | Any personal data beyond the login-routing hash (§1.5) |
+| Tenant lifecycle audit — provisioned, suspended, deprovisioned | Any counter or aggregate derived from tenant business data |
+
+**Consequences.**
+- Compromise of the control database yields the **map**, not the **territory**. Per-tenant database credentials live in the secret store, so the registry alone grants no access (threat T-20).
+- The control database is availability-critical: if routing is unavailable, every tenant is unavailable. It is small, read-mostly and heavily cached, and the router must serve from cache during a control-database outage rather than failing every request.
+- **No cross-tenant reporting is possible from it**, which is the intended cost. Product-level analytics require a separately-governed ETL that does not exist and is out of scope ([ARCHITECTURE.md](ARCHITECTURE.md) §3.3).
+- A "tenant health dashboard" is the boundary case to police: counts of *operational* state (schema version, attestation, last migration) are permitted; counts of *business* state (events, decisions, reviewers) are not.
+
+### 1.4.1 `tenant_identity` — the anti-misrouting assertion
+
+Every tenant database carries a **single-row** `tenant_identity` table naming the tenant it belongs to. The router reads it immediately after acquiring a connection and before executing anything ([ARCHITECTURE.md](ARCHITECTURE.md) §8.9.1 step 7).
+
+> **Why this is not paranoia.** In a silo model there is no `tenant_id` column on the rows, so nothing in the data can contradict a wrong connection. A stale registry cache, a recycled pool entry, a copied connection string, or a backup restored into the wrong target will all write one customer's events into another customer's database, and **every constraint in §6 will happily accept them** — the rows are perfectly valid, merely in the wrong universe. The identity assertion is the only thing standing between a routing defect and a silent cross-tenant contamination that no later audit can untangle. It costs one cached round trip per connection acquisition.
+
+## 1.5 Authentication and tenant resolution
+
+A login by email address must resolve to a tenant **before** any tenant database is opened. This is the one place where a cross-tenant surface necessarily exists, so it is designed rather than improvised.
+
+| Element | Decision |
+|---|---|
+| Where credentials live | **In the tenant database**, in `users.password_hash`. C2 and C4 data never leave the tenant boundary |
+| What the control database holds | `user_directory`: `sha256(lower(trim(email)))` → `tenant_id`. **The address itself is never stored** |
+| Login flow | Hash the submitted address → look up tenant → bind → verify Argon2id hash **inside** the tenant database |
+| Unknown address | Generic failure, identical response shape and comparable timing to a wrong password |
+| Rate limiting | As TRD §12.7 — 5/min/IP, 10/hour/account |
+| Agents | **No directory lookup.** An agent credential is issued per tenant and carries its tenant at registration |
+
+**Residual risk, stated plainly (T-19).** The directory makes address existence probeable, and by extension makes it possible to learn which organisations are customers — commercially sensitive in a market with this few buyers. Hashing the address protects the directory *at rest*; it does not stop probing. Generic errors and rate limiting raise the cost; they do not remove the surface.
+
+**The complete fix is tenant-scoped login** — the user supplies a tenant code, or reaches the product on a tenant-specific host, so no global lookup exists at all. It is not adopted now because it adds an onboarding step to a product whose deployment friction is already a survival metric (QS-7, PRD P-06). **Raise it before the second paying tenant**, when the directory first contains something worth probing. Recorded as R-10.
+
+---
+
 # 2. Conceptual Model
 
 Entities correspond one-to-one with the vocabulary in [RULE_BOOK.md](RULE_BOOK.md) §3.1, which is normative. **Definitions are not repeated here** — a second copy of a definition is a second thing that can drift. What is added is the persistence consequence of each.
 
+**Every entity below lives in a tenant database** (§1.3). The control database's own entities are in §1.4 and are not business entities.
+
 | Entity | RULE_BOOK term | Persistence consequence |
 |---|---|---|
-| `sites` | Site | Isolation boundary; every scoped query filters on it (ADR-012) |
+| `tenant_identity` | **Tenant** — *not yet in the RULE_BOOK vocabulary; see `AMD-RB-01`* | Single row. Names the tenant this database belongs to, so a misrouted connection is caught before it writes (§1.4.1) |
+| `sites` | Site | Scope boundary **within** the tenant; every scoped query filters on it (ADR-012). No longer the isolation boundary between customers — that is the database itself (ADR-016) |
 | `cameras` | Camera | Holds an encrypted credential the control plane cannot read |
 | `zones` | Zone | Geometry in a **normalised** coordinate space, so it survives a resolution change |
 | `detection_rules` | Detection Rule | `is_active` defaults FALSE — BR-001 lives in a column default |
@@ -121,7 +210,13 @@ Entities correspond one-to-one with the vocabulary in [RULE_BOOK.md](RULE_BOOK.m
 | **`event_ingest_keys`** | *(idempotency)* | **New** — required once `events` is partitioned. §3.5 |
 | **`event_daily_counts`** | *(derived)* | **New** — lets aggregate counts survive record deletion. RULE_BOOK §8.1 |
 
-## 2.1 The entity that deliberately does not exist
+## 2.1 The column that deliberately does not exist: `tenant_id`
+
+There is **no `tenant_id` column on any business table**, and adding one would be a defect rather than defensive depth. In a silo model the database *is* the scope, so a `tenant_id` column would be a value that is either always the same (and therefore useless) or sometimes different (and therefore evidence of the contamination it was supposed to prevent). Worse, its presence invites a filter — and a filter invites a forgotten filter, which is precisely the failure class ADR-016 was adopted to eliminate.
+
+The tenant is asserted **once per connection**, in `tenant_identity` (§1.4.1), not **once per row**.
+
+## 2.2 The entity that deliberately does not exist
 
 There is no `persons`, `workers`, `tracks`, `identities` or `embeddings` table, and there never will be. [RULE_BOOK.md](RULE_BOOK.md) §3.2 contains no *worker is identified* fact type and no *worker has activity measure* fact type, so a feature requiring one **cannot be expressed in the product's own vocabulary**. This is not a filter to be maintained; it is an absence to be preserved. See §4.
 
@@ -1302,6 +1397,9 @@ flowchart LR
 | Any column matching §4.1 | ABSOLUTE rule violation |
 | Changing `ON DELETE` from `RESTRICT` to `CASCADE` on any relation reaching `events` or `audit_log` | Creates a path by which configuration deletes evidence |
 | A revision that also modifies the bypass suite | Automatically T3 and **must be split** ([GOVERNANCE.md](GOVERNANCE.md) §8.2) |
+| Adding a `tenant_id` column to any business table | §2.1 — reintroduces the filter-based scoping that ADR-016 eliminated |
+| Applying a tenant revision to the control database, or the reverse | §13.4 — two schemas, two revision lines, never shared |
+| Marking a tenant `active` without a passing attestation | §13.5.1 step 7 |
 
 ## 13.4 Baseline revision plan
 
@@ -1323,14 +1421,57 @@ Revision order is constrained by foreign keys, and the dependency is **not** the
 | `0103` `[V1]` | `event_ingest_keys`; `events` partitioning | **T3** — changes the idempotency mechanism (§3.5) |
 | `0104` `[V1]` | `audit_log` chain columns + checkpointing (ADR-015) | **T3** |
 
+Revisions above apply to the **tenant** schema. The control database has its own independent revision line, prefixed `c0001`, `c0002`, … — it is a different schema with a different lifecycle and must never share a migration history with tenant databases.
+
+## 13.5 Fan-out under ADR-016
+
+Every tenant-schema revision now runs **once per tenant**. This is the largest operational change introduced by database-per-tenant and the source of risk R-9.
+
+| Rule | Statement |
+|---|---|
+| **Per-tenant transaction** | Each tenant migrates in its own transaction. One tenant's failure never leaves another partially migrated |
+| **Version recorded centrally** | `tenant_schema_versions` in the control database records each tenant's current revision, the attempt outcome and the timestamp. **Drift is queryable, not discovered** |
+| **Drift suspends** | A tenant behind head, or failing attestation, is marked `drifted` and **refused binding**. Serving a database whose rule enforcement is unverified is worse than serving an error |
+| **Order** | Canary tenant first — an internal tenant that exists for exactly this purpose — then the remainder. A migration that fails on the canary never reaches a customer |
+| **Expand/contract is mandatory** | §13.2 stops being advisory. During any fan-out the fleet is genuinely mixed-version, so both schema shapes must be tolerable to the running application |
+| **Idempotent and resumable** | A fan-out interrupted halfway is re-runnable; tenants already at head are skipped |
+| **Attestation is separate** | FF-11 verifies the **presence of constraints**, independently of whether a migration reported success. A migration that returns zero and a database that lacks a trigger are different facts, and only the second one matters |
+
+### 13.5.1 Provisioning a tenant
+
+Provisioning is **code, never a runbook**. A hand-built tenant is the schema-drift risk arriving on day one.
+
+| Step | Action | Failure behaviour |
+|---|---|---|
+| 1 | Create the database and its owner role | Abort; nothing registered |
+| 2 | Migrate to head from revision `0001` | Abort; drop the database; nothing registered |
+| 3 | Insert the single `tenant_identity` row | Abort; drop |
+| 4 | Seed `roles` (§14) | Abort; drop |
+| 5 | Create the evidence-store prefix and its access policy | Abort; drop |
+| 6 | Register in the control database, status `provisioning` | — |
+| 7 | **Run FF-11 attestation** | Fail → status `drifted`, never `active`; alert |
+| 8 | Bootstrap the `site_admin` user, password set at first login | — |
+| 9 | Status `active`; the router may now bind to it | — |
+
+**A tenant reaches `active` only by passing attestation.** There is no path from "database created" to "serving traffic" that skips step 7.
+
+### 13.5.2 Deprovisioning
+
+Final export → `DROP DATABASE` → remove the evidence prefix → **retain the registry row and its lifecycle audit as a tombstone**, with `deleted_at` set.
+
+> Deleting the registry row alongside the database would erase the record that the tenant ever existed — including the audited fact of the deletion. The data goes; the fact of its deletion does not. This is BR-009's *"every deletion is recorded"* applied one level above the schema.
+
 ---
 
 # 14. Seed and Reference Data
 
+Seed data is written **per tenant database**, by the provisioning code path in §13.5.1 — never by hand, and never once for a shared schema.
+
 | Data | Content | When |
 |---|---|---|
-| `roles` | `reviewer`, `safety_manager`, `site_admin`, `auditor` — fixed IDs so grants are portable across environments | Baseline migration |
-| Bootstrap `site_admin` | Created by an operator command with a password set at first login. **Never a default credential** ([TRD.md](TRD.md) §12.6 A05) | Deployment |
+| `tenant_identity` | Exactly one row, naming this tenant | Provisioning step 3 |
+| `roles` | `reviewer`, `safety_manager`, `site_admin`, `auditor` — fixed IDs so grants are portable across environments **and comparable across tenants** | Provisioning step 4 |
+| Bootstrap `site_admin` | Created by the provisioning command with a password set at first login. **Never a default credential** ([TRD.md](TRD.md) §12.6 A05) | Provisioning step 8 |
 | `model_versions` | **None.** A model version is registered only after gate G1 | — |
 | `sites`, `cameras`, `zones` | **None.** Configured during onboarding | — |
 | `detection_rules` | **None, ever.** A seeded rule would violate BR-001 outright | — |
@@ -1344,6 +1485,8 @@ Revision order is constrained by foreign keys, and the dependency is **not** the
 > **No forecast is given here.** Candidate events per shift is `[OPEN — PRD OQ-4]` and is, per [TRD.md](TRD.md) §17.1, *"the critical unknown"*. What follows is a **parametric model** so that the moment OQ-4 is measured, sizing follows arithmetic rather than a new investigation. The illustrative arithmetic in §15.2 is a worked example of the formula, **not a prediction**, and no figure from it may appear in customer-facing material (BR-M-01 `[PROPOSED]`).
 
 ## 15.1 The model
+
+**Under ADR-016 these figures are per tenant**, and a tenant's total is the sum over its sites. Two consequences: a tenant's database is sized from *its own* sites, not from a fleet average; and the fleet-wide number that matters operationally is not total rows but **tenant count**, because that is what drives connections (§17.3), migration fan-out time (§13.5) and backup schedules.
 
 | Quantity | Formula |
 |---|---|
@@ -1413,6 +1556,9 @@ Substituting `C = 3`, `H = 16`, and `R` at three arbitrary values purely to show
 
 | Property | Requirement |
 |---|---|
+| **Granularity** | **Per tenant.** Each tenant database has its own schedule, its own PITR timeline and its own restore drill. The control database is backed up independently |
+| **Restore blast radius** | Restoring one tenant does not touch another — one of ADR-016's material operational gains, and the reason a per-tenant recovery request is a routine operation rather than a project |
+| **Restore target verification** | A restore **must** confirm `tenant_identity` matches the intended tenant before the database is registered as active. Restoring tenant A's dump into tenant B's database is the highest-consequence operator error this topology permits (§1.4.1) |
 | Encryption | Encrypted with a key **separate** from the database's own ([TRD.md](TRD.md) §12.4) |
 | Scope | Full database including `audit_log`. Excluding the audit log from backups would be a data-integrity failure |
 | Evidence store | Backed up on its own schedule; a database restore alone leaves `evidence_state='present'` rows pointing at absent objects (§12.3) |
@@ -1432,6 +1578,10 @@ Run after every restore, in this order. Each maps to a rule that a restore could
 | 5 | No `evidence_state='present'` row has a missing object | §12.3 |
 | 6 | No `event_id` appears twice | §3.5 |
 | 7 | Row counts and max `id` reconcile against the pre-restore checkpoint | Completeness |
+| 8 | **`tenant_identity` names the tenant this database is registered as** | §1.4.1, ADR-016 |
+| 9 | **FF-11 attestation passes** — every §6.6 constraint and trigger present and enabled, schema at head | T-18, R-9 |
+
+**Checks 8 and 9 are the ones ADR-016 adds, and a restore is not complete without them.** A restore is the most likely way for a tenant database to end up both mis-identified and behind head — the two conditions that make cross-tenant contamination and unenforced business rules possible at the same time.
 
 **Check 3 is the one that gives a restore evidentiary standing.** Without a chain, a restored audit log is a copy of a database, and there is no way to demonstrate it is *the same* audit log. With one, it is verifiable — which is exactly the difference between a record and a claim, and therefore exactly the product's proposition applied to its own recovery.
 
@@ -1443,9 +1593,11 @@ Run after every restore, in this order. Each maps to a rule that a restore could
 
 ## 17.1 Roles
 
+**Roles are per tenant database.** Each tenant has its own `gl_app`, `gl_retention`, `gl_readonly` and `gl_owner` roles with their own credentials, held in the secret store and referenced — never stored — by the control database (ADR-017). A credential leak is therefore bounded to one tenant.
+
 | Role | Used by | Grants |
 |---|---|---|
-| `gl_owner` | **Migrations only.** Never by a running service | DDL on the schema |
+| `gl_owner` | **Migrations only.** Never by a running service | DDL on that tenant's schema |
 | `gl_app` | API instances | `SELECT`, `INSERT`, `UPDATE` on operational tables; `INSERT` **only** on `audit_log`; **no DDL**; no `DELETE` on `events` |
 | `gl_retention` | Retention worker `[V1]` | `gl_app` plus `DELETE` on `events`, `event_corrections`, `coverage_gaps` |
 | `gl_readonly` | Reporting replica, analytics `[V1]` | `SELECT` on operational tables. **No access to `users.password_hash`, `agents.credential_hash` or `cameras.stream_url_encrypted`** — granted per column |
@@ -1481,6 +1633,27 @@ GRANT SELECT (id, site_id, name, location_description, stream_profile,
 | `gl_app` cannot `UPDATE` or `DELETE` on `audit_log` | Defence in depth with §10.1. Trigger *and* grant, so removing either alone changes nothing |
 | No service runs as `gl_owner` | A compromised API cannot drop a constraint or disable a trigger — the mitigation for T-12's most likely non-insider path |
 | `gl_readonly` has column-level grants | A reporting replica cannot become a credential-exfiltration surface (T-13) |
+| Per-tenant credentials, held in the secret store | A leaked connection string reaches **one** tenant. Under a shared database it would have reached every customer |
+| The control-database role cannot connect to any tenant database | Compromising routing does not grant data access (T-20) |
+
+## 17.3 Connections are the ceiling, not throughput
+
+Database-per-tenant changes what limits the system first.
+
+| Quantity | Relationship |
+|---|---|
+| Connections consumed | `API instances × tenants × pool size` |
+| PostgreSQL `max_connections` | A few hundred before memory per backend becomes the constraint |
+| Practical implication | **A few dozen tenants exhausts a single cluster long before write volume does** |
+
+| Remedy | When |
+|---|---|
+| Small per-tenant pools (2–4), aggressively recycled | From the first multi-tenant deployment |
+| A connection pooler in transaction mode, per tenant | As tenant count grows |
+| Lazy pools — open on first use, close after idle timeout | Most tenants are idle outside their shift hours, which this exploits directly |
+| Shard tenants across clusters by cohort | When one cluster's connection budget is exhausted |
+
+> **This is the scaling limit ADR-016 introduces, and it is a different limit from the one [TRD.md](TRD.md) §18 anticipates.** §18.3 identifies reviewer capacity as the binding product constraint and single-primary write volume as the eventual technical one. Under database-per-tenant, **connection count binds first** — and it binds on tenant count, which is the number the business is actively trying to increase.
 
 ---
 
@@ -1496,7 +1669,9 @@ GRANT SELECT (id, site_id, name, location_description, stream_profile,
 | `queue_depth` | 200 unverified events across two cameras | Q-1 performance, cursor pagination |
 | `decided_history` | Mixed accepted / rejected / corrected with reviewers and audit entries | Reporting, BR-R-01 |
 | `retention_ready` | Time-shifted rows past a short retention window | MOD-11 `[V1]` |
-| `two_sites` | Two sites, users scoped to one each | FF-9 cross-site read attempt |
+| `two_sites` | Two sites in **one** tenant, users scoped to one each | FF-9 cross-site read attempt |
+| `two_tenants` | Two provisioned tenant databases with overlapping site names and user emails | FF-12 binding test, DB-21…DB-24 |
+| `drifted_tenant` | A tenant database deliberately missing one §6 constraint | **FF-11 attestation must fail and the tenant must be refused binding** |
 | `partitioned` `[V1]` | Events straddling a partition boundary with a replayed `event_id` | §3.5 idempotency |
 
 **No fixture contains real footage or a real person.** Evidence frames in fixtures are synthetic images.
@@ -1527,6 +1702,13 @@ GRANT SELECT (id, site_id, name, location_description, stream_profile,
 | DB-18 | As `gl_app`, `ALTER TABLE audit_log DISABLE TRIGGER ALL` | Permission denied | §17, T-12 |
 | DB-19 | `INSERT` a second open gap for the same agent, camera and reason | `uq_coverage_gaps_open` rejects | §6.6 |
 | DB-20 | `INSERT` an expired event carrying a `reviewer_id` | `chk_decided_requires_reviewer` rejects | `AMD-DB-04` |
+| **DB-21** | Connect with tenant A's credentials to tenant B's database | Permission denied — credentials are per tenant | ADR-016, §17 |
+| **DB-22** | Bind a request to tenant A, hand it a connection to tenant B | **Router aborts on the `tenant_identity` mismatch and quarantines the pool** | §1.4.1, T-17, FF-12 |
+| **DB-23** | Execute any query with no tenant binding | No unbound state exists; the request is refused before a connection is acquired | §1.3, FF-12 |
+| **DB-24** | Insert a second row into `tenant_identity` | Rejected — single-row constraint | §1.4.1 |
+| **DB-25** | Mark a tenant `active` in the control database while it is behind head | Rejected — attestation gates the transition | §13.5.1 step 7, R-9 |
+| **DB-26** | Run FF-11 against `drifted_tenant` | **Attestation fails and the tenant is refused binding**, not merely alerted | T-18, R-9 |
+| **DB-27** | Store any event, decision or reviewer identifier in the control database | No such table or column exists | ADR-017 |
 
 **DB-8, DB-15 and DB-16 are the three worth reading twice.** DB-8 closes a gap the existing suite does not cover. DB-15 and DB-16 cannot be executed at all — the statement is unwritable, because the column does not exist. **That is the strongest form of enforcement in this document**, and it is why §4 (the negative schema) is a section rather than a footnote.
 
@@ -1548,9 +1730,13 @@ Nothing here is resolved by assumption. Per [GOVERNANCE.md](GOVERNANCE.md) G-5, 
 
 ---
 
-# Appendix A — Amendments proposed to the TRD
+# Appendix A — Proposed amendments to other controlled documents
 
-**These are not edits.** [GOVERNANCE.md](GOVERNANCE.md) §19.1 assigns [TRD.md](TRD.md) to Kapil under ADR + T2/T3 change control. Each is a proposed amendment for the owner to accept, reject or defer; rejections are recorded, not discarded ([GOVERNANCE.md](GOVERNANCE.md) §8.3).
+## A.1 — To the TRD
+
+[GOVERNANCE.md](GOVERNANCE.md) §19.1 assigns [TRD.md](TRD.md) to Kapil under ADR + T2/T3 change control. Each row is an amendment for the owner to accept, reject or defer; rejections are recorded, not discarded ([GOVERNANCE.md](GOVERNANCE.md) §8.3).
+
+> **Tenancy is not in this list.** The ADR-016 changes were applied directly to [TRD.md](TRD.md) §2, §8–9, §13 and §18 by the owner on 2026-08-12. The sixteen rows below predate that change and remain outstanding.
 
 | ID | TRD ref | Issue | Proposed amendment | Tier |
 |---|---|---|---|---|
@@ -1571,15 +1757,35 @@ Nothing here is resolved by assumption. Per [GOVERNANCE.md](GOVERNANCE.md) G-5, 
 | **AMD-DB-15** | §9.7 | Nothing prevents two simultaneously open coverage gaps for the same camera and reason, which double-counts unavailability in coverage reporting | Add the partial unique index `uq_coverage_gaps_open` | T1 |
 | **AMD-DB-16** | §9.11, §19.4 | The append-only trigger is row-level `BEFORE UPDATE OR DELETE`, which **does not fire on `TRUNCATE`**. The bypass suite tests `UPDATE` and `DELETE` and would pass while `TRUNCATE audit_log` erased the trail | Add a statement-level `BEFORE TRUNCATE` trigger and bypass case DB-8 | **T3** |
 
+## A.2 — To the RULE_BOOK
+
+[GOVERNANCE.md](GOVERNANCE.md) §19.1 assigns [RULE_BOOK.md](RULE_BOOK.md) to **Kuldeep**, not to the TRD owner, so these cannot be applied with the tenancy change and are raised here for that owner.
+
+ADR-016 introduces a concept the normative vocabulary does not contain. [RULE_BOOK.md](RULE_BOOK.md) §3 states that *"no rule below uses a term that is not defined here"*, and §3.2 that the listed fact types are *"the only relationships the rules may assert"* — so **Tenant** must be added, or ADR-016 describes a structure the rule book cannot talk about.
+
+| ID | RULE_BOOK ref | Issue | Proposed amendment | Tier |
+|---|---|---|---|---|
+| **AMD-RB-01** | §3.1 Terms | There is no **Tenant** term. A concept that now owns the isolation boundary, the database, the backup and the erasure obligation is unnameable in the normative vocabulary | Add: *"**Tenant** — a customer organisation holding a commercial relationship with Guardian Lens. A Tenant owns one or more Sites, and holds exactly one database (ARCHITECTURE.md ADR-016). Tenants are isolated from one another physically, not by filtering."* | **T3** — vocabulary underpinning enforcement |
+| **AMD-RB-02** | §3.1, term *Site* | *Site* is defined as *"Single-tenant in v1"*, which conflated Site with Tenant. With a Tenant term that sentence is now wrong: a Site is not a tenant, it belongs to one | Replace *"Single-tenant in v1"* with *"A Site belongs to exactly one Tenant. A Tenant may own several Sites."* | **T3** |
+| **AMD-RB-03** | §3.2 Fact types | The permitted fact types have no *site belongs to tenant* relation, so no rule can be written about tenant scope | Add the fact type *"site belongs to tenant"* | **T3** |
+| **AMD-RB-04** | §4.6 Security and identity | No rule states that data may not cross a tenant boundary. It is currently an architectural property with no rule behind it, which means no bypass-suite case is *required* by the catalogue | Consider a new `BR-S-04` `[NEW]`: *"No query, report, export or aggregate may combine data belonging to more than one Tenant."* Enforcement: physical separation (ADR-016) + FF-12. Classification suggested **DEF · CONSTRAINT · ABSOLUTE** | **T4** — a new rule, requiring RAPID under [GOVERNANCE.md](GOVERNANCE.md) §8.4 |
+
+> **AMD-RB-04 is the substantive one.** Everything else here is vocabulary catching up with a decision. This one asks whether cross-tenant isolation should be a *rule* rather than only an architectural property — and given that [RULE_BOOK.md](RULE_BOOK.md) §6 requires ABSOLUTE rules to have more than one enforcement point *"so that no single refactor can remove the guarantee"*, the answer is probably yes. It is raised, not assumed: creating a rule is the rule book owner's decision under §8.4, never the architect's.
+
 ---
 
 # Appendix B — Consolidated DDL specification
 
 **Specification, not a migration.** This listing exists so a reviewer can read the whole schema in one place. Constraint and trigger bodies are in §6 and §10.1 and are **not repeated here** — they are referenced by name.
 
+Two schemas, two independent revision lines (§13.4): **B.1** is the tenant schema, created once per tenant database; **B.2** is the control schema, created once for the whole installation.
+
+## B.1 Tenant schema — one database per tenant
+
 ```sql
 -- ============================================================
--- Guardian Lens — control-plane schema
+-- Guardian Lens — TENANT schema
+-- One database per tenant (customer organisation) — ADR-016.
 -- SPECIFICATION ONLY. Not a migration. Not to be executed.
 -- PostgreSQL 16.  Scope: [MVP] unless marked.
 --
@@ -1587,12 +1793,27 @@ Nothing here is resolved by assumption. Per [GOVERNANCE.md](GOVERNANCE.md) G-5, 
 -- a valid creation order — identity and configuration are mutually
 -- dependent (detection_rules.created_by -> users; user_roles.site_id
 -- -> sites). Creation order is the revision sequence in §13.4.
+--
+-- NOTE: there is deliberately NO tenant_id column on any table.
+-- The database IS the tenant scope. See §2.1.
 -- ============================================================
 
 -- gen_random_uuid() is core from PostgreSQL 13, so pgcrypto is not
 -- required for UUIDs on 16. Declared only if crypto functions are
 -- otherwise needed; drop it if they are not.
 CREATE EXTENSION IF NOT EXISTS citext;     -- case-insensitive email
+
+-- ---------- tenant identity ----------
+
+-- Exactly one row. Read by the Tenant Router immediately after
+-- acquiring a connection and before executing anything (§1.4.1).
+-- A mismatch against the intended tenant aborts the request.
+CREATE TABLE tenant_identity (
+    singleton   BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    tenant_id   UUID        NOT NULL,
+    tenant_slug VARCHAR(64) NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- ---------- configuration ----------
 
@@ -1842,8 +2063,93 @@ CREATE TABLE event_daily_counts (           -- §5.12 — survives deletion
 --   activity_metrics · productivity_scores
 --   hr_integrations · disciplinary_actions · outbound_webhooks
 --   audio_clips · video_clips
+--   tenant_id on any business table (§2.1)
 -- See §4. Their absence is BR-002, BR-003, BR-006, BR-P-01
 -- and BR-008 enforced in the only way that cannot be refactored away.
+-- ============================================================
+```
+
+## B.2 Control schema — one per installation
+
+```sql
+-- ============================================================
+-- Guardian Lens — CONTROL schema
+-- Routing, lifecycle and operational state ONLY — ADR-017.
+-- Holds no tenant business data. Revision line c0001, c0002, …
+-- SPECIFICATION ONLY. Not a migration. Not to be executed.
+-- ============================================================
+
+CREATE TABLE tenants (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug          VARCHAR(64)  NOT NULL UNIQUE,   -- stable, URL-safe
+    display_name  VARCHAR(200) NOT NULL,
+    status        VARCHAR(20)  NOT NULL DEFAULT 'provisioning'
+                  CHECK (status IN ('provisioning','active','suspended',
+                                    'drifted','deprovisioned')),
+    provisioned_at TIMESTAMPTZ,
+    suspended_at   TIMESTAMPTZ,
+    deleted_at     TIMESTAMPTZ,                   -- tombstone; row is retained
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_tenant_active_is_provisioned CHECK (
+        status <> 'active' OR provisioned_at IS NOT NULL
+    )
+);
+
+CREATE TABLE tenant_databases (
+    tenant_id       UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE RESTRICT,
+    host            VARCHAR(255) NOT NULL,
+    port            INTEGER      NOT NULL DEFAULT 5432,
+    database_name   VARCHAR(63)  NOT NULL,
+    -- A REFERENCE into the secret store. Never the credential itself.
+    credential_ref  VARCHAR(255) NOT NULL,
+    evidence_prefix VARCHAR(255) NOT NULL,
+    UNIQUE (host, port, database_name)
+);
+
+CREATE TABLE tenant_schema_versions (
+    tenant_id         UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE RESTRICT,
+    current_revision  VARCHAR(64) NOT NULL,
+    target_revision   VARCHAR(64) NOT NULL,
+    last_attempt_at   TIMESTAMPTZ,
+    last_outcome      VARCHAR(20)
+                      CHECK (last_outcome IN ('success','failed','skipped')),
+    last_error        TEXT,
+    attested_at       TIMESTAMPTZ,          -- FF-11
+    attestation_ok    BOOLEAN
+);
+
+-- Login routing only. The address itself is NEVER stored — §1.5.
+CREATE TABLE user_directory (
+    email_hash BYTEA PRIMARY KEY,           -- sha256(lower(trim(email)))
+    tenant_id  UUID  NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Tenant lifecycle audit. Same append-only posture as the tenant
+-- audit_log: fn_audit_append_only + no-truncate triggers (§10.1).
+CREATE TABLE control_audit_log (
+    id           BIGSERIAL PRIMARY KEY,
+    actor        VARCHAR(200) NOT NULL,     -- operator or 'system.<job>'
+    action       VARCHAR(64)  NOT NULL,     -- tenant.provisioned,
+                                            -- tenant.suspended,
+                                            -- tenant.deprovisioned,
+                                            -- tenant.migrated, …
+    tenant_id    UUID REFERENCES tenants(id) ON DELETE RESTRICT,
+    before_state JSONB,
+    after_state  JSONB,
+    occurred_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ============================================================
+-- Columns that must never appear in this schema:
+--   any event, decision, reviewer identity or audit entry
+--   any camera, zone, rule or site configuration
+--   any counter or aggregate derived from tenant business data
+--   any plaintext database credential
+-- See ADR-017 §1.4. A "tenant health dashboard" may count
+-- OPERATIONAL state (schema version, attestation, last migration).
+-- It may never count BUSINESS state (events, decisions, reviewers).
 -- ============================================================
 ```
 
@@ -1854,6 +2160,7 @@ CREATE TABLE event_daily_counts (           -- §5.12 — survives deletion
 | Version | Date | Change | Author | Reviewed by |
 |---|---|---|---|---|
 | 1.0 | 2026-08-08 | Initial database design. Four-store data architecture, negative schema, physical schema with constraint and trigger specifications, PII map, retention mechanics, edge SQLite store, evidence store, migration strategy, volumetric model, backup and recovery, database access control, data-layer bypass suite. ADR-014 and ADR-015. Sixteen proposed TRD amendments in Appendix A. | — | — |
+| 1.1 | 2026-08-12 | **Isolated multi-tenancy per ADR-016.** New §1.3 tenancy topology, §1.4 control database (**ADR-017**) and `tenant_identity`, §1.5 authentication and tenant resolution; §2.1 why no `tenant_id` column exists; §13.5 migration fan-out, provisioning and deprovisioning; per-tenant backup, restore verification and integrity checks 8–9; §17.3 connection ceiling; bypass cases DB-21…DB-27; control schema in Appendix B.2; four RULE_BOOK amendments in Appendix A.2. TRD §2, §8–9, §13, §18 updated in place by the owner. | — | Kapil (owner) |
 
 # Sign-off
 

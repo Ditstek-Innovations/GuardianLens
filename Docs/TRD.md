@@ -5,11 +5,12 @@
 | Field | Value |
 |---|---|
 | Document | Technical Requirement Document (TRD) |
-| Version | 1.0 |
+| Version | 1.1 |
 | Status | For engineering review and build |
 | Inputs | Product Discovery research (D00–D18) · Product Requirements Document (PRD) v1.0 |
 | Architecture scope | **Production system.** Components in MVP scope are marked `[MVP]`. Later phases marked `[V1]` and `[V2+]`. |
-| Authority | Where this document and the PRD disagree, **the PRD prevails**. Business rules BR-001 … BR-012 are architectural constraints, not preferences. |
+| Authority | Where this document and the PRD disagree, **the PRD prevails**. Business rules BR-001 … BR-012 are architectural constraints, not preferences. Where this document and **[RULE_BOOK.md](RULE_BOOK.md)** disagree on *what a rule requires*, the rule book prevails; on *how it is enforced*, this document prevails. **§2 is a summary view of [ARCHITECTURE.md](ARCHITECTURE.md); §8–9 are summary views of [DATABASE.md](DATABASE.md)** — where they disagree, those documents prevail. |
+| Companions | [ARCHITECTURE.md](ARCHITECTURE.md) — normative architecture description · [DATABASE.md](DATABASE.md) — normative data model |
 | Answers | PRD OQ-12 (security architecture), NFR-SEC-06, and the deployment topology deferred in D17 §7 |
 
 ---
@@ -50,8 +51,11 @@ Every technology and architecture choice below was made by the architect using s
 | TD-015 | Inference runtime | **ONNX Runtime** with TensorRT provider on Jetson | Decouples the trained model from the deployment hardware, making TD-003 cheap to reverse. | Low |
 | TD-016 | Monitoring | **Prometheus + Grafana**, self-hosted | No vendor lock-in; runs in the same Compose stack. | Low |
 | TD-017 | Cloud provider | **AWS** as reference; architecture is provider-agnostic | Default only. Nothing in the design depends on AWS-specific services. | Low |
+| TD-018 | **Tenant isolation** | **Database per tenant** — one PostgreSQL database per customer organisation | Physical isolation between customers, not filtering. Cross-tenant exposure ceases to be a defect class; per-tenant erasure, restore and relocation become clean operations. Full rationale and cost ledger in **[ARCHITECTURE.md](ARCHITECTURE.md) ADR-016**, which supersedes ADR-012. | **High.** Reversing to a shared schema means merging N databases and reintroducing filter-based scoping |
 
-> **If any decision above is wrong, say so now.** TD-002 and TD-005 are the two that become expensive after implementation starts.
+> **If any decision above is wrong, say so now.** TD-002, TD-005 and TD-018 are the three that become expensive after implementation starts.
+>
+> **On migrating this register to ADRs.** [GOVERNANCE.md](GOVERNANCE.md) §8.5 states that TD-001…TD-017 are the seed set, migrated to individual ADRs *"at the first architectural change"*. TD-018 is that change. The register is retained here for continuity and the migration is scheduled rather than performed inline, because converting seventeen settled decisions during a tenancy change would mix two unrelated changes in one review — exactly what §8.1 forbids. New decisions from this point are recorded as ADRs in [ARCHITECTURE.md](ARCHITECTURE.md) §9, not as TD entries.
 
 ---
 
@@ -105,6 +109,8 @@ Ranked. Where two conflict, the higher-ranked wins.
 ---
 
 # 2. Solution Architecture
+
+> **This section is a summary view.** [ARCHITECTURE.md](ARCHITECTURE.md) is the normative architecture description — arc42 structure, C4 levels 1–3, runtime scenarios, threat model, ADRs and quality scenarios. Where the two disagree, **ARCHITECTURE.md prevails** and this section is corrected. The diagrams below are retained as the orientation view; they are not the specification.
 
 ## 2.1 High-Level Architecture
 
@@ -240,22 +246,33 @@ flowchart TB
     end
     subgraph CLOUD["Control Plane — cloud or customer DC"]
         LB[Load Balancer / TLS]
-        API1[API instance 1]
-        API2[API instance 2]
-        DB[(PostgreSQL<br/>primary + replica)]
-        OBJ[(S3-compatible<br/>evidence store)]
+        API1[API instance 1<br/>+ Tenant Router]
+        API2[API instance 2<br/>+ Tenant Router]
+        CDB[(Control DB<br/>registry · routing)]
+        SEC[Secret store<br/>per-tenant credentials]
+        subgraph TEN["One database per tenant — TD-018"]
+            DB1[(Tenant DB: acme<br/>PostgreSQL + PITR)]
+            DB2[(Tenant DB: globex<br/>PostgreSQL + PITR)]
+        end
+        OBJ[(S3-compatible<br/>evidence store<br/>per-tenant prefix)]
         MON[Prometheus + Grafana]
     end
     EA1 -->|HTTPS outbound only| LB
     EA2 -->|HTTPS outbound only| LB
     LB --> API1 & API2
-    API1 & API2 --> DB
+    API1 & API2 --> CDB
+    API1 & API2 --> SEC
+    API1 & API2 --> DB1 & DB2
     API1 & API2 --> OBJ
     API1 & API2 --> MON
     USER[Reviewers] --> LB
 ```
 
 > **Outbound only.** Edge agents initiate all connections. No inbound path to the site is required, satisfying NFR-SEC-05 and persona P-4's primary objection.
+
+> **Tenant isolation is physical — TD-018.** A **tenant** is a customer organisation owning one or more sites. Each tenant has its own PostgreSQL database; nothing is shared between tenants except the stateless API tier, the routing registry and the object-store service. Sites A and B above may belong to the same tenant or to different ones — sites of one tenant share that tenant's database, sites of different tenants share nothing. Full model in [ARCHITECTURE.md](ARCHITECTURE.md) §8.9 and [DATABASE.md](DATABASE.md) §1.3.
+>
+> **The consequence that matters most:** the CHECK constraints and triggers enforcing BR-004 and BR-005 now exist **once per tenant database**, so the product's central guarantee is only as strong as the weakest tenant's schema. Continuous per-tenant constraint attestation (fitness function FF-11) is a release condition for this topology, not a follow-up — see [ARCHITECTURE.md](ARCHITECTURE.md) §8.2.3 and risk R-9.
 
 ## 2.4 Component Diagram
 
@@ -838,11 +855,16 @@ flowchart LR
 
 # 8. Database Design
 
+> **This section and §9 are summary views.** [DATABASE.md](DATABASE.md) is the normative data-model specification — DDL, constraint and trigger bodies, indexes with their queries, data classification, retention mechanics, the edge store, migration strategy and operations. Where they disagree, **DATABASE.md prevails** and these sections are corrected. Sixteen amendments arising from that review are listed in [DATABASE.md](DATABASE.md) Appendix A.1 and remain outstanding.
+
+> **One database per tenant — TD-018.** Everything in §8 and §9 describes the schema of a **single tenant database**, instantiated once per customer organisation. There is deliberately **no `tenant_id` column on any table**: the database is the tenant scope, so there is no filter to apply and therefore no filter to forget. A separate small **control database** holds the tenant registry, routing and per-tenant schema version, and holds no business data ([DATABASE.md](DATABASE.md) §1.4). Each tenant database additionally carries a single-row `tenant_identity` table, asserted by the router on every connection acquisition, because in a silo model nothing in the rows themselves can contradict a mis-routed connection.
+
 ## 8.1 Entities
 
 | Entity | Purpose | Scope |
 |---|---|---|
-| `sites` | A physical location | `[MVP]` |
+| `tenant_identity` | Single row naming the tenant this database belongs to — anti-misrouting assertion | `[MVP]` |
+| `sites` | A physical location, belonging to exactly one tenant | `[MVP]` |
 | `cameras` | A camera at a site | `[MVP]` |
 | `zones` | A polygon on a camera view | `[MVP]` |
 | `detection_rules` | A rule bound to a zone, with a written-rule reference | `[MVP]` |
@@ -925,6 +947,8 @@ These implement business rules at the data layer. **They are not optional and mu
 # 9. Database Schema
 
 Complete DDL for the production schema. `[MVP]` tables are marked; `[V1]` tables are included so the schema does not require restructuring later.
+
+> **Summary view.** The normative schema, including full constraint and trigger bodies, the control-database schema and the edge SQLite store, is [DATABASE.md](DATABASE.md) §5, §6 and Appendix B. The tables below are the tenant schema, created once per tenant database (TD-018).
 
 ## 9.1 `sites` `[MVP]`
 
@@ -1578,7 +1602,8 @@ flowchart TB
 | Camera → Edge Agent | RTSP on the site LAN | Credentials encrypted at rest on the agent; never leaves the site |
 | Edge Agent → Control Plane | HTTPS, outbound only | TLS 1.3, agent credential, payload validation, no inbound path to site |
 | Browser → Control Plane | HTTPS | TLS 1.3, JWT, CORS allowlist, CSP |
-| Control Plane → Database | Internal network | TLS, least-privilege database role |
+| Control Plane → Database | Internal network | TLS, least-privilege database role, **per tenant** |
+| **Tenant → Tenant** `[V1]` | **None. There is no connection spanning two tenant databases** | Physical separation (TD-018); per-tenant credentials; `tenant_identity` asserted on every connection acquisition. Threats T-17…T-20 in [ARCHITECTURE.md](ARCHITECTURE.md) §8.2 |
 
 **Video never crosses a trust boundary.** Only structured events and a single evidence frame do.
 
@@ -1721,9 +1746,12 @@ A recorded video file replaces a live camera. This is legitimate and deliberate:
 | Component | Specification |
 |---|---|
 | Edge agent host | Jetson Orin family or x86 mini-PC per site, depending on camera count `[OPEN — OQ-9]` |
-| API | 2+ instances behind a load balancer with TLS termination |
-| Database | Managed PostgreSQL 16, automated backups, point-in-time recovery, read replica for reporting |
-| Evidence store | S3-compatible with lifecycle policy aligned to retention configuration |
+| API | 2+ instances behind a load balancer with TLS termination. Each instance carries the Tenant Router and per-tenant connection pools |
+| Database | **One managed PostgreSQL 16 database per tenant** (TD-018), each with automated backups, point-in-time recovery and optional read replica. Plus one small **control database** for registry and routing |
+| Database credentials | **Per tenant**, held in the secret store and referenced — never stored — by the control database. A leaked connection string reaches one tenant, not all of them |
+| Connection budget | `API instances × tenants × pool size`. **This is the binding scaling limit under TD-018, not write volume** — see §18.3 and [DATABASE.md](DATABASE.md) §17.3 |
+| Tenant provisioning | Code path only, never manual: create → migrate to head → seed → attest → activate. A tenant reaches `active` only by passing constraint attestation ([DATABASE.md](DATABASE.md) §13.5.1) |
+| Evidence store | S3-compatible with lifecycle policy aligned to retention configuration, **partitioned by tenant prefix** with its own access policy |
 | Monitoring | Prometheus, Grafana, alert routing |
 | Log aggregation | Centralised, with the audit channel separated |
 | Secrets | Managed secret store |
@@ -1986,8 +2014,9 @@ Audit entries are written to the `audit_log` table, **not to a log file**. This 
 | Component | Scalable? | Method |
 |---|---|---|
 | Edge agent | Per site, per camera group | Add agents; they are independent and share nothing |
-| API | Yes | Stateless; add instances behind the load balancer |
-| Database | Read replicas for reporting | Writes remain single-primary — appropriate for the write volume |
+| API | Yes | Stateless; add instances behind the load balancer. Note each instance multiplies the connection budget by the tenant count |
+| Database | Per tenant, plus read replicas for reporting | **Scaling is by tenant, not by shard** (TD-018). Each tenant's writes remain single-primary, which is appropriate for per-tenant write volume. Beyond one cluster's connection budget, tenants are distributed across clusters by cohort |
+| Control database | Vertically only; it is small and read-mostly | **Availability-critical** — if routing is unavailable, every tenant is unavailable. The router serves from cache during a control-database outage rather than failing requests |
 | Evidence store | Yes | Object storage scales independently |
 | Retention worker | Single instance, leader-elected `[V1]` | Concurrent deletion is not desirable |
 
@@ -2008,6 +2037,8 @@ Audit entries are written to the `audit_log` table, **not to a log file**. This 
 | Verified events in the queue query | Slower queue load | Already mitigated by the partial index |
 | Reporting over long periods | Slow aggregation | Materialised views `[V1]` |
 | Evidence storage growth | Cost | Retention policy enforcement — MOD-11 |
+| **Database connections** `[V1]` | **Connection exhaustion at a few dozen tenants, long before write volume is a problem** | Small per-tenant pools, lazy open/close on idle, a transaction-mode pooler, then tenant cohorts across clusters ([DATABASE.md](DATABASE.md) §17.3). **This is the limit TD-018 introduces and the one that binds on the number the business is trying to increase** |
+| **Migration fan-out time** `[V1]` | Every schema change runs once per tenant; the window grows linearly with tenants | Per-tenant transactions, canary-first ordering, resumable runs, and drift recorded centrally ([DATABASE.md](DATABASE.md) §13.5). A tenant behind head is **suspended from binding**, not served |
 
 > **The most important row is the second.** The binding constraint on this system is human review capacity, not compute. Scaling infrastructure to accommodate more events a human cannot review would be scaling the wrong thing — and would make PRD RD-01 worse, not better.
 
@@ -2075,6 +2106,11 @@ A dedicated suite that **actively attempts to violate every ABSOLUTE rule.** It 
 | Authenticate as an agent and attempt a decision | 403 |
 | Enable a rule without an audit entry | Impossible — same transaction |
 | Include a rejected event in a report | Repository filter prevents it |
+| **`TRUNCATE audit_log`** | **Trigger rejects** — a row-level trigger does not fire on TRUNCATE, so a statement-level one is required ([DATABASE.md](DATABASE.md) §10.1) |
+| **Bind a request to tenant A and hand it a connection to tenant B** | **Router aborts on the `tenant_identity` mismatch and quarantines the pool** |
+| **Execute any query with no tenant binding** | Impossible — no unbound state exists |
+| **Connect to another tenant's database with this tenant's credentials** | Permission denied — credentials are per tenant |
+| **Serve traffic from a tenant database missing any rule-bearing constraint** | **FF-11 attestation fails; the tenant is suspended from binding, not merely alerted** |
 
 > **This suite is the executable form of the PRD's business rules.** If it passes, the product's core commitments hold. If it fails, the product is not shippable regardless of feature completeness.
 
@@ -2363,3 +2399,23 @@ Twenty-four risks across technical, AI, operational and security categories (§2
 | OQ-9 | Cameras per edge device | Engineering | §17.1, §18.2, TD-003 |
 
 > **None of these blocks the start of the build.** Steps 1–3 of the pilot deployment sequence (§20.2) require no camera, no model and no measured figures. They should begin while the camera audit runs in parallel.
+
+---
+
+## Change log
+
+| Version | Date | Change | Author | Tier |
+|---|---|---|---|---|
+| 1.0 | 2026-07-31 | Initial technical requirement document | Kapil | — |
+| 1.1 | 2026-08-12 | **Isolated multi-tenancy.** New **TD-018** — database per tenant, where a tenant is a customer organisation. §2 and §8–9 marked as summary views of [ARCHITECTURE.md](ARCHITECTURE.md) and [DATABASE.md](DATABASE.md). §2.3 production topology, §8 entities, §12.1 trust boundaries, §13.4 production infrastructure, §18.1 and §18.3 scaling limits, and §19.4 bypass suite updated for per-tenant databases. TD register migration to ADRs scheduled rather than performed inline. | Kapil | **T3** — touches enforcement points in [RULE_BOOK.md](RULE_BOOK.md) §6 |
+
+### Outstanding against this version
+
+| Item | Where | Owner |
+|---|---|---|
+| Sixteen data-model amendments from the DATABASE.md review — including the `TRUNCATE audit_log` hole and the missing `ON DELETE` behaviours | [DATABASE.md](DATABASE.md) Appendix A.1 | Kapil |
+| Ten architecture amendments from the ARCHITECTURE.md review | [ARCHITECTURE.md](ARCHITECTURE.md) Appendix A | Kapil |
+| Four RULE_BOOK amendments — the **Tenant** term does not exist in the normative vocabulary, and cross-tenant isolation has no rule behind it | [DATABASE.md](DATABASE.md) Appendix A.2 | **Kuldeep** |
+| RFC and SARB review for this T3 change, stating which rules are affected and how each remains true | [GOVERNANCE.md](GOVERNANCE.md) §8.2, §8.3 | Kapil |
+
+> **This version was recorded as a T3 change.** [GOVERNANCE.md](GOVERNANCE.md) §8.2 requires SARB review and the Decide holder for anything touching a [RULE_BOOK.md](RULE_BOOK.md) §6 enforcement point, and TD-018 replicates every data-layer enforcement point once per tenant. The document has been amended by its owner; **the review has not yet been held**, and the RFC required by §8.3 is outstanding. Ownership authorises the edit, not the approval.

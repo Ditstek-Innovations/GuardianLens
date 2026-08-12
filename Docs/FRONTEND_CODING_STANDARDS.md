@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document | Coding Standards (Frontend — React + TypeScript) |
-| Version | 1.2 |
+| Version | 1.3 |
 | Status | Draft for review |
 | Programme phase | Week 3 — Govern · 8 August 2026 |
 | Applies to | `web/` — the Review Web App (TRD §7). Backend Python standards are a separate document. |
@@ -41,7 +41,7 @@ Start from the contract and the user-visible behaviour. The sequence is a defaul
 
 | Not here | Where it lives |
 |---|---|
-| Which screens exist and what they do | TRD §7.1 |
+| Which screens exist and what they do | TRD §7.1 — restated here as a route/feature/role map in §23.1, which is derived from it and never extends it |
 | What the product may never build | RULE_BOOK §4 · TRD §7.4 "Components that must not be built" |
 | API endpoint shapes | TRD §10 · generated OpenAPI types |
 | Backend / edge-agent Python standards | *(separate document — not yet written)* |
@@ -88,21 +88,26 @@ web/
 │   │   │   │   ├── Button.types.ts
 │   │   │   │   ├── Button.test.tsx
 │   │   │   │   └── index.ts
-│   │   │   ├── Input/  Select/  Modal/  Badge/  Spinner/  Table/  Toast/
+│   │   │   ├── Input/  Select/  Modal/  Badge/  Spinner/  Table/  Toast/  Pagination/
 │   │   │   └── index.ts            # Single barrel for the primitives layer
-│   │   └── layout/                 # AppShell, SideNav, PageHeader — domain-aware, feature-agnostic
+│   │   └── layout/                 # AppShell, SideNav, PageHeader, AdminLayout — domain-aware, feature-agnostic
 │   │
 │   ├── features/                   # One directory per bounded slice of the product
-│   │   └── review-queue/
-│   │       ├── api/                # Query + mutation hooks ONLY
-│   │       │   ├── useQueueQuery.ts
-│   │       │   ├── useSubmitDecision.ts
-│   │       │   └── queryKeys.ts
-│   │       ├── components/         # Feature-local components
-│   │       ├── hooks/              # Feature-local non-server logic
-│   │       ├── types.ts            # Feature-owned view models and state types, when needed
-│   │       ├── constants.ts
-│   │       └── index.ts            # The feature's PUBLIC surface. Cross-feature imports use this only.
+│   │   ├── auth/                   # SCR-1 Login, session bootstrap, sign-out — §23.3
+│   │   ├── review-queue/
+│   │   │   ├── api/                # Query + mutation hooks ONLY
+│   │   │   │   ├── useQueueQuery.ts
+│   │   │   │   ├── useSubmitDecision.ts
+│   │   │   │   └── queryKeys.ts
+│   │   │   ├── components/         # Feature-local components
+│   │   │   ├── hooks/              # Feature-local non-server logic
+│   │   │   ├── types.ts            # Feature-owned view models and state types, when needed
+│   │   │   ├── constants.ts
+│   │   │   └── index.ts            # The feature's PUBLIC surface. Cross-feature imports use this only.
+│   │   ├── event-history/  rejection-log/  reports/
+│   │   └── admin/                  # Grouping directory only — no barrel of its own (CS-F-04)
+│   │       └── cameras/  zones-rules/  retention/  users/  audit-log/  system-health/
+│   │                               # SCR-7…SCR-12 — each is a feature with its own api/, components/, index.ts (§23.5)
 │   │
 │   ├── lib/
 │   │   ├── api/
@@ -443,7 +448,9 @@ Button.displayName = 'Button';
 
 ### 5.3 Primitive roadmap
 
-Likely primitives include `Button`, `IconButton`, `Input`, `Textarea`, `Select`, `Checkbox`, `Radio`, `Label`, `FormField`, `Modal`, `Badge`, `Spinner`, `Skeleton`, `Table`, `Toast`, `Tooltip`, `EmptyState`, `ErrorState` and `Card`.
+Likely primitives include `Button`, `IconButton`, `Input`, `PasswordInput`, `Textarea`, `Select`, `Checkbox`, `Radio`, `Label`, `FormField`, `Modal`, `Badge`, `Spinner`, `Skeleton`, `Table`, `Pagination`, `Tabs`, `Breadcrumb`, `Toast`, `Tooltip`, `EmptyState`, `ErrorState` and `Card`.
+
+`Pagination` is not optional furniture: every list surface in the product is server-paged (§9.5), so it is built once, keyboard-operable and announced, and never re-implemented per screen.
 
 Build a primitive when a feature needs it, starting with controls used by the critical review flow. Do not build the entire catalogue speculatively. Each primitive must ship with its accessibility behaviour, types and tests.
 
@@ -601,6 +608,70 @@ export const useSubmitDecision = (eventId: string) => {
       void queryClient.invalidateQueries({ queryKey: queueKeys.all });
     },
   });
+};
+```
+
+### 9.5 Pagination
+
+Every list in this product is a **server-paged, cursor-based** list. TRD §10.1 fixes the contract — `?limit=&cursor=` — and it is cursor-based deliberately: the review queue moves while the reviewer works it, and offset paging over a moving dataset silently skips and repeats rows. A skipped row in this product is a candidate event nobody ever saw.
+
+| ID | Rule |
+|---|---|
+| **CS-PG-01** | **Paging is cursor-based, always.** The client sends `limit` and an opaque `cursor` and follows the server's `next_cursor`. No page numbers are computed, no offset is constructed, and no total page count is displayed unless the API returns one. A "Page 7 of 42" the server never asserted is an invented fact. |
+| **CS-PG-02** | The cursor is **opaque**. Never decode, parse, increment, slice or persist it beyond the URL and the query key. It is a server token, not a client value. |
+| **CS-PG-03** | **Pagination state lives in the URL** (`?limit=&cursor=`), with filters, sort and selection — CS-RT-03. Refresh, back and a shared link return the reviewer to the same page of the same list. Component state that holds a cursor is a bug: it dies on reload and takes the reviewer's position with it. |
+| **CS-PG-04** | `limit` and `cursor` are external input (CS-G-13). Parse them at the route boundary: an unparseable or out-of-range `limit` falls back to `DEFAULT_PAGE_SIZE` rather than being forwarded; a rejected cursor (`400`/`422`) resets to the first page and states why. Never issue a request with `cursor=undefined` interpolated into it. |
+| **CS-PG-05** | Page size comes from `constants/query.ts` — `DEFAULT_PAGE_SIZE` and `PAGE_SIZE_OPTIONS`. No literal `20` in a hook. A screen that offers a page-size control writes the chosen value to the URL and resets the cursor. |
+| **CS-PG-06** | **Changing a filter, sort or page size resets the cursor to the first page in the same URL update.** A cursor is only valid for the query that produced it; sending yesterday's cursor with today's filters asks the server a question it cannot answer honestly. |
+| **CS-PG-07** | The cursor and limit are part of the query key (CS-D-03). The key factory takes them; a component never assembles a key literal to page. |
+| **CS-PG-08** | **Queue depth is the server's total, not `items.length`.** The depth badge shows the whole backlog, never the current page's row count — DP-4, CS-B-08. `Showing 20 of 340` and `340 awaiting review` are different claims; render the one the API actually supports. |
+| **CS-PG-09** | Paging keeps the previous page rendered with `aria-busy` while the next loads (`placeholderData: keepPreviousData`) and prefetches the next cursor when it is known. A table that blanks to a spinner on every page change costs the reviewer their place — DP-2. |
+| **CS-PG-10** | **Explicit Next / Previous controls. No infinite scroll on evidence, record or audit surfaces.** A reviewer must be able to say which page they were on, and an auditor must be able to return to it. Where a load-more affordance is deliberately chosen for a specific list, the cursor is still mirrored to the URL and the total stays visible. |
+| **CS-PG-11** | Polling refetches **the page currently displayed only**, and never auto-advances the page under the reviewer. When a decision empties the last row of a page, the reviewer is shown an explicit end-of-page state with a Next/Previous action — the UI does not jump pages on its own (DP-2, DP-4). |
+| **CS-PG-12** | **No client-side paging, sorting, filtering or slicing across pages.** A page is a server answer; sorting the twenty rows in hand and calling it "sorted by time" misrepresents the dataset. Sort is a request parameter — CS-P-06, CS-P-08. |
+| **CS-PG-13** | End-of-list is an explicit rendered state, distinct from empty (CS-D-07). `Next` at the end is disabled with `aria-disabled` **and** a stated reason; a dead control with no explanation is a dead end for a keyboard user who cannot hover. |
+| **CS-PG-14** | Pagination renders through the `Pagination` primitive: a `<nav aria-label="Pagination">` of real buttons, keyboard-operable, ≥44×44 targets, with the current range announced via `aria-live` so a screen-reader user knows the page changed (CS-A-01, CS-A-06, CS-A-08). No feature hand-rolls Next/Previous buttons — CS-U-01. |
+| **CS-PG-15** | Export and report generation are server operations over the **whole** filtered set, never over the page in hand. Exporting the current page while labelling it a report is a BR-R-01 misstatement. |
+
+```ts
+// features/event-history/api/queryKeys.ts — page params are part of the key, never appended ad hoc
+export const historyKeys = {
+  all:   ['history'] as const,
+  lists: () => [...historyKeys.all, 'list'] as const,
+  list:  (filters: HistoryFilters, page: PageParams) =>
+    [...historyKeys.lists(), filters, page] as const,
+} as const;
+
+// features/event-history/api/useHistoryQuery.ts
+export const useHistoryQuery = (filters: HistoryFilters, page: PageParams) =>
+  useQuery<HistoryPage>({
+    queryKey: historyKeys.list(filters, page),
+    queryFn: async ({ signal }) => {
+      const raw = await apiClient.get('/api/v1/events', {
+        params: { ...filters, limit: page.limit, cursor: page.cursor },
+        signal,
+      });
+      return historyPageSchema.parse(raw);
+    },
+    // CS-PG-09 — the table does not blank between pages.
+    placeholderData: keepPreviousData,
+  });
+```
+
+```ts
+// features/event-history/hooks/useHistoryPaging.ts
+// CS-PG-04 / CS-PG-06 — the URL is parsed once here and nothing downstream re-checks it.
+export const useHistoryPaging = (): HistoryPaging => {
+  const [params, setParams] = useSearchParams();
+
+  const limit = parsePageSize(params.get('limit'));      // clamps to PAGE_SIZE_OPTIONS
+  const cursor = params.get('cursor') ?? undefined;      // opaque — CS-PG-02
+
+  const goToPage = (next: string | undefined) => setParams(withCursor(params, next));
+  const applyFilters = (filters: HistoryFilters) =>
+    setParams(withCursor(withFilters(params, filters), undefined)); // cursor reset — CS-PG-06
+
+  return { page: { limit, cursor }, goToPage, applyFilters };
 };
 ```
 
@@ -865,6 +936,9 @@ A standard that relies on human memory decays. Everything below runs in CI (TRD 
 | CS-D-01 | Scoped `no-restricted-globals: fetch` override; allow it only in the API transport module and test infrastructure |
 | CS-S-07 | `no-restricted-imports`: `redux`, `zustand`, `mobx`, `jotai` |
 | CS-ENV-01 | `no-restricted-properties` / `no-restricted-syntax` on `import.meta.env` outside `lib/env.ts` |
+| CS-AU-06 / CS-AU-07 | `no-restricted-syntax` on `localStorage`/`sessionStorage` writes outside `hooks/useLocalStorage` and the session-draft hook; secret scanner covers the rest. Token storage is a review item |
+| CS-PG-01 / CS-PG-05 | `no-restricted-syntax` on `offset`/`page=` request params and on numeric literals passed as `limit` outside `constants/query.ts`; cursor opacity is a review item |
+| CS-SC-01 / CS-RT-01 | CI grep asserts every route in `router.tsx` has a `ROUTES` constant and a §23.1 row; a new screen fails the check until the TRD and this table are updated |
 | CS-A-* | `plugin:jsx-a11y/recommended` at error |
 | Hooks correctness | `react-hooks/rules-of-hooks` and `react-hooks/exhaustive-deps` at error |
 | CS-M-04 | CI grep/custom lint rule validates the exact ticket-and-owner TODO format; `no-warning-comments` alone cannot do this |
@@ -915,7 +989,166 @@ TRD §3 lists React, TypeScript, Vite, Tailwind and TanStack Query. The rules ab
 
 ---
 
-## 23. Definition of Done
+## 23. Screens, application shell, authentication and the admin area
+
+TRD §7.1 says *which* screens exist. This section says what every one of them must look like structurally, so that twelve screens built by different agents at different times are recognisably one application: one shell, one navigation, one login, one administration area, one table, one pagination control.
+
+### 23.1 The screen inventory is fixed
+
+Every route in the application maps to exactly one row of TRD §7.1. **A screen that is not in this table is a TRD change, not a frontend decision.**
+
+| ID | Screen | Route constant | Feature directory | Minimum role | Scope |
+|---|---|---|---|---|---|
+| SCR-1 | Login | `ROUTES.LOGIN` | `features/auth` | — (public) | `[MVP]` |
+| SCR-2 | Review Queue — **home** | `ROUTES.QUEUE` | `features/review-queue` | `reviewer` | `[MVP]` |
+| SCR-3 | Candidate Detail | `ROUTES.CANDIDATE` | `features/review-queue` | `reviewer` | `[MVP]` |
+| SCR-4 | Event History | `ROUTES.HISTORY` | `features/event-history` | `reviewer` | `[MVP]` |
+| SCR-5 | Rejection Log | `ROUTES.REJECTIONS` | `features/rejection-log` | `reviewer` | `[MVP]` |
+| SCR-6 | Reports | `ROUTES.REPORTS` | `features/reports` | `safety_manager` | `[MVP]` basic |
+| SCR-7 | Camera Configuration | `ROUTES.ADMIN_CAMERAS` | `features/admin/cameras` | `site_admin` | `[MVP]` minimal |
+| SCR-8 | Zone & Rule Configuration | `ROUTES.ADMIN_RULES` | `features/admin/zones-rules` | `safety_manager` | `[MVP]` minimal |
+| SCR-9 | Retention Settings | `ROUTES.ADMIN_RETENTION` | `features/admin/retention` | `site_admin` | `[V1]` |
+| SCR-10 | Audit Log Viewer | `ROUTES.ADMIN_AUDIT` | `features/admin/audit-log` | `auditor` | `[V1]` |
+| SCR-11 | User & Role Management | `ROUTES.ADMIN_USERS` | `features/admin/users` | `site_admin` | `[V1]` |
+| SCR-12 | System Health | `ROUTES.ADMIN_HEALTH` | `features/admin/system-health` | `site_admin` | `[V1]` |
+
+| ID | Rule |
+|---|---|
+| **CS-SC-01** | Every screen is reachable by a typed route constant (CS-RT-01), lazily loaded (CS-RT-04) except the queue, and sits inside an error boundary (CS-RT-05). |
+| **CS-SC-02** | Every screen renders inside `AppShell` (§23.2). Login, not-found and the root error screen are the only exceptions, and they render no navigation at all. |
+| **CS-SC-03** | Every screen with server data renders four distinct states — loading, error, empty, content (CS-D-07) — plus end-of-list where it pages (CS-PG-13). A screen with three of the five is not finished. |
+| **CS-SC-04** | Every screen sets the document title and moves focus to its `<h1>` on navigation (CS-RT-07), and has exactly one `<h1>`, rendered by `PageHeader`. |
+| **CS-SC-05** | The minimum role above shapes navigation only. The API decides (CS-SEC-03, CS-RT-06), and a `403` renders an explicit "you do not have access to this" screen with a route back to the queue — never a blank page and never a silent redirect loop. |
+| **CS-SC-06** | `[V1]` screens are absent until built: no route, no nav entry. A nav item that leads to "coming soon" trains users to distrust the navigation. |
+
+### 23.2 The application shell
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│ [skip to main]                                                            │
+│ ┌── header ───────────────────────────────────────────────────────────┐   │
+│ │ Guardian Lens   Site: Bay Plant ▾        340 awaiting review   A. Reviewer ▾ │
+│ └─────────────────────────────────────────────────────────────────────┘   │
+│ ┌── nav ─────────────┐ ┌── main ─────────────────────────────────────┐    │
+│ │ REVIEW             │ │ ┌ PageHeader ─────────────────────────────┐ │    │
+│ │  • Review queue 340│ │ │ H1 Event history          [ actions ]   │ │    │
+│ │ RECORDS            │ │ └─────────────────────────────────────────┘ │    │
+│ │  • Event history   │ │  filters (URL-backed)                       │    │
+│ │  • Rejection log   │ │  ┌ Table ────────────────────────────────┐  │    │
+│ │  • Reports         │ │  └───────────────────────────────────────┘  │    │
+│ │ ADMINISTRATION     │ │  ┌ Pagination — Prev / Next, cursor-based ┐  │    │
+│ │  • Cameras         │ │  └───────────────────────────────────────┘  │    │
+│ │  • Zones & rules   │ │                                             │    │
+│ │  • Users …         │ │                                             │    │
+│ └────────────────────┘ └─────────────────────────────────────────────┘    │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+| ID | Rule |
+|---|---|
+| **CS-SH-01** | One shell: `components/layout/AppShell` composes `Header`, `SideNav` and `<main>`. A screen renders page content only — it never renders its own header, navigation or shell chrome. |
+| **CS-SH-02** | Navigation items are declared once in `constants/navigation.ts`, typed against route constants and roles, grouped **Review · Records · Administration**. No component inlines a nav list or a role string. |
+| **CS-SH-03** | **Queue depth is rendered by the shell, so it is visible from every screen** — not only from the queue. A backlog that disappears when the reviewer opens a report is a hidden backlog (DP-4, CS-B-08). |
+| **CS-SH-04** | The shell is responsive: a persistent sidebar at `lg` and above, a drawer below it that traps focus, closes on `Escape` and closes on navigation (CS-A-05). Collapsing the sidebar never collapses the depth indicator — it moves to the header, it does not vanish. |
+| **CS-SH-05** | `PageHeader` owns the `<h1>`, the optional description and the screen's primary actions; the document title derives from the same value so the tab and the heading can never disagree. |
+| **CS-SH-06** | Landmarks are structural and singular: one `<header>`, one `<nav aria-label="Primary">`, one `<main id="main">`, skip link first in tab order (CS-A-10). |
+| **CS-SH-07** | The toast region and the `aria-live` announcer are mounted once, by the shell. A feature that mounts its own announcer produces double announcements. |
+| **CS-SH-08** | Nothing in the shell interrupts the review path: no onboarding interstitial, no marketing modal, no notification pane covering the queue. The queue is home (TRD §7.2) and it opens ready to work. |
+| **CS-SH-09** | The header states the current principal and the current site, and offers sign-out. A reviewer whose name will appear on every record they verify (BR-005) must be able to see, at a glance, whose session they are working in. |
+
+### 23.3 SCR-1 — the login screen
+
+Login is a two-panel screen on `md` and above: **identity on the left, the form on the right.** The left panel says what the product is and what the person is signing in to; the right panel does exactly one thing. Below `md` the panel collapses to a compact header and the form takes the full width — the fields are never pushed below the fold on a phone.
+
+```
+┌────────────────────────────────┬──────────────────────────────────┐
+│  Guardian Lens                 │   H1  Sign in                    │
+│                                │                                  │
+│  Human-verified safety and     │   Email                          │
+│  compliance monitoring for     │   [                          ]   │
+│  the cameras you already own.  │                                  │
+│                                │   Password                       │
+│  • Nothing is recorded until   │   [                      ] [👁]   │
+│    a person confirms it.       │                                  │
+│  • Nothing outside a           │   [ Sign in                  ]   │
+│    configured safety rule is   │                                  │
+│    watched at all.             │   ⚠ Email or password is         │
+│                                │      incorrect.                  │
+│  (decorative, alt="")          │                                  │
+└────────────────────────────────┴──────────────────────────────────┘
+   ≥ md: 2 columns          < md: panel collapses to a header, form full width
+```
+
+| ID | Rule |
+|---|---|
+| **CS-AU-01** | Login renders outside `AppShell` and contains **no navigation** — no sidebar, no site switcher, no links into the application. There is nothing to navigate to yet. |
+| **CS-AU-02** | The left panel is informational and decorative only. It carries no controls, no second form, and **no imagery of workers and no evidence frame** — an evidence frame on an unauthenticated screen is a retention and privacy breach (BR-006, CS-SEC-10). Decorative images carry `alt=""` (CS-A-07). |
+| **CS-AU-03** | The form is one `<form>` with real `<label>`s, `autoComplete="username"` and `autoComplete="current-password"`, a `type="submit"` button — the `Button` primitive defaults to `type="button"` (§5.2), so submit must be passed explicitly — and Enter submits from either field. |
+| **CS-AU-04** | **A `401` renders one generic message: "Email or password is incorrect."** The UI never distinguishes an unknown account from a wrong password, never reveals whether an email exists, and never varies its wording or timing by cause — TRD §10.2 requires no user enumeration. It renders as persistent form-level text with `role="alert"`, not a toast that vanishes before it is read. |
+| **CS-AU-05** | A `429` (TRD §12.7: 5/min per IP, 10/hour per account) renders an honest, distinct message stating that too many attempts have been made and when to try again. The client never auto-retries a login and never silently swallows the limit into the generic credential error. |
+| **CS-AU-06** | Submit is disabled **only while the request is in flight** (CS-FM-05). The password is never logged, never written to `localStorage` or `sessionStorage`, never placed in a query string, and never included in an error report (CS-SEC-04). |
+| **CS-AU-07** | The access token is held **in memory only**; the refresh credential follows CS-SEC-06. Tokens never go to `localStorage`. Refresh is single-flight and centralised in the API client (CS-D-13) — no component refreshes a session. |
+| **CS-AU-08** | On success, redirect to the route the user was trying to reach, captured as an internal path before the redirect to login and **validated as a same-origin relative path** (CS-SEC-05) — an open redirect on the login screen is a credential-phishing surface. With no captured intent, the destination is the review queue. |
+| **CS-AU-09** | On a `401` from any request, the API client clears the principal, clears the query cache and routes to login preserving intent. On sign-out it clears the cache, `sessionStorage` drafts and any cached evidence URL (CS-SEC-07). A stale queue must never be visible after sign-out. |
+| **CS-AU-10** | **v1 has no self-service registration, no email password reset, no social sign-in and no "forgot password" flow.** Users are created by a `site_admin` (TRD §10.6). These affordances are absent from the build, not hidden — anything else is an account-enumeration surface the API does not back. |
+| **CS-AU-11** | Login is fully keyboard-operable, focuses the email field on mount, moves focus to the error on a failed submit (CS-FM-04), keeps visible focus rings (CS-Y-08) and remains usable at 200% zoom. It is the first screen every user meets; it is not exempt from §15. |
+
+### 23.4 Roles and navigation
+
+Four roles (TRD §12.3). The frontend uses them to decide what to *show*; the server decides what is *allowed* (CS-SEC-03).
+
+| Role | Sees in navigation |
+|---|---|
+| `reviewer` | Review queue, candidate detail, event history, rejection log |
+| `safety_manager` | The above + reports + zones & rules |
+| `site_admin` | Everything, including cameras, users, retention, system health |
+| `auditor` | Event history, rejection log, audit log — **read-only: no decision affordance is rendered at all** |
+
+| ID | Rule |
+|---|---|
+| **CS-RB-01** | The role→navigation mapping is declared once (CS-SH-02). A component that writes `role === 'site_admin'` inline is a duplicate of that mapping and will drift from it. |
+| **CS-RB-02** | Role checks shape navigation and rendering only. Every screen still handles `403` (CS-SC-05), because a role in a token is a claim, not an authorisation. |
+| **CS-RB-03** | For a role that cannot act, the action is **absent, not disabled**. An auditor sees a record; they do not see a greyed-out Accept button implying a decision they might have made. |
+| **CS-RB-04** | No role, flag or configuration makes a §17 prohibition reachable. `site_admin` is not a bypass — there is no role in this product that can bulk-accept, view a person, or auto-dispose, because those affordances do not exist for anyone (CS-ENV-04). |
+
+### 23.5 The admin area (SCR-7 … SCR-12)
+
+The admin area is where a site expands what is watched. Every screen in it changes the product's scope over real people, so its rules are stricter than its visual importance suggests.
+
+| ID | Rule |
+|---|---|
+| **CS-AD-01** | Admin screens use the **same shell, same primitives, same tokens** as the review screens. There is no second design system for administration and no second Button (CS-U-01). |
+| **CS-AD-02** | Admin routes nest under `/admin` inside `AdminLayout`, which adds a breadcrumb and the section's secondary navigation. Every admin list is `Table` + `Pagination` per §9.5; every admin form obeys §10. |
+| **CS-AD-03** | **Enabling monitoring is an explicit, confirmed submit — never a toggle that acts on flip.** Activating a rule, adding a camera, changing a zone, altering retention or deactivating a user requires a confirmation step that names in plain words what will change and where. BR-001 (nothing monitored by default) and BR-C-02 (activation is always explicit) are enforced here or nowhere. |
+| **CS-AD-04** | Scope-changing submits are **never optimistic** (CS-D-06). The UI shows the new state only after the server confirms it, because the configuration change and its audit entry are written in one transaction (BR-C-01) — a change that was not audited did not happen, and must not appear to have. |
+| **CS-AD-05** | The rule configuration form carries the written site safety rule reference (BR-011). Its absence renders a visible, non-blocking warning — advisory means flagged, not prevented. |
+| **CS-AD-06** | **Camera credentials are write-only.** The stream URL and credentials are entered, submitted and thereafter shown masked with a "replace" action. The UI never requests, renders, logs or round-trips a stored credential (BR-S-03, NFR-SEC-02). Use "test connection" (TRD §10.6) for feedback, never credential echo. |
+| **CS-AD-07** | The retention screen states the effect in plain language before submit: what will be deleted, when, and that deletion is permanent and audited (BR-009, EP-6). A retention period is not a number in a box; it is an instruction to destroy evidence on a schedule. |
+| **CS-AD-08** | User management renders identity, role and scope only. **No worker exists in this product and no user-activity surface is built**: no login counts, no decisions-per-hour, no reviewer leaderboard, no productivity chart (BR-002, CS-B-02). Reviewer identity is never a client-supplied field anywhere (BR-S-01, CS-B-05). |
+| **CS-AD-09** | The audit log viewer is read-only: no edit, no delete, no bulk action. Filters narrow the view, and the applied filter is always stated alongside a one-click clear, so a filtered log is never mistaken for the whole log (NFR-AUD-02). |
+| **CS-AD-10** | System health never implies a false all-clear. Unknown, stale and unreachable are distinct rendered states — text plus icon, never colour alone (CS-A-02) — and a missing heartbeat renders as *unknown*, not *healthy*. Coverage gaps are shown as recorded gaps (FR-005, PR-6). |
+| **CS-AD-11** | Every admin screen is code-split and stays out of the queue's critical bundle (CS-RT-04, CS-P-02). Administration is occasional; the queue is the daily job. |
+| **CS-AD-12** | Admin screens carry the same accessibility obligations as the review path: keyboard-operable throughout, labelled fields, associated errors, focus management on submit (§15). "It is only used by an administrator" is not an exemption. |
+
+### 23.6 Screen-level tests this section requires
+
+| Test | Asserts |
+|---|---|
+| Login — invalid credentials | One generic message; no wording, timing or field-level hint that distinguishes unknown account from wrong password (CS-AU-04) |
+| Login — rate limited | Distinct `429` message; no automatic retry (CS-AU-05) |
+| Login — redirect intent | A captured internal path is honoured; an absolute or cross-origin `next` is rejected and the queue is used (CS-AU-08) |
+| Sign-out | Query cache and session drafts cleared; protected content unrenderable afterwards (CS-AU-09) |
+| Shell — depth visibility | Queue depth is present on a non-queue screen and at mobile width (CS-SH-03, CS-SH-04) |
+| Navigation by role | An `auditor` session renders no decision affordance anywhere — absent, not disabled (CS-RB-03) |
+| Pagination — filter change | Changing a filter clears the cursor from the URL and refetches page one (CS-PG-06) |
+| Pagination — keyboard and announcement | Next/Previous operable by keyboard; the current range is announced (CS-PG-14) |
+| Pagination — depth | The depth badge reflects the server total, not the page length (CS-PG-08) |
+| Admin — activation | A rule becomes active only after an explicit confirmed submit and a server-confirmed response (CS-AD-03, CS-AD-04) |
+| Admin — credentials | No stored camera credential is ever rendered or returned into a form field (CS-AD-06) |
+
+---
+
+## 24. Definition of Done
 
 A change is not done until every line is true. This is the review checklist; use it verbatim.
 
@@ -928,7 +1161,9 @@ A change is not done until every line is true. This is the review checklist; use
 - [ ] External values are validated once at the boundary; internal code trusts the validated contract
 - [ ] All server state via TanStack Query, with a key factory; mutations invalidate precisely
 - [ ] Filters, sort, pagination and selection are held in the URL, not component state
-- [ ] Loading, error and empty are distinct rendered states
+- [ ] Lists page through the server cursor contract; the cursor resets on any filter change; depth is the server total
+- [ ] The screen renders inside the shell, sets its title, owns one `<h1>` and moves focus on navigation
+- [ ] Loading, error, empty, end-of-list and `403` are distinct rendered states
 - [ ] Forms validate through one schema, associate errors with fields, and never discard user input on failure
 - [ ] Timestamps and confidence render through the shared formatters, with zone and unit shown
 - [ ] Policy values, routes, storage keys and non-obvious literals are named; trivial literals remain local
@@ -944,7 +1179,7 @@ A change is not done until every line is true. This is the review checklist; use
 
 ---
 
-## 24. Precedence and change control
+## 25. Precedence and change control
 
 1. Where this document conflicts with the **RULE_BOOK**, the Rule Book prevails, always and without exception.
 2. Where it conflicts with the **TRD** on architecture or stack, the TRD prevails; this document is corrected.
@@ -954,17 +1189,18 @@ A change is not done until every line is true. This is the review checklist; use
 
 ---
 
-## 25. Change log
+## 26. Change log
 
 | Version | Date | Change | Author |
 |---|---|---|---|
+| 1.3 | 12 Aug 2026 | Added pagination (§9.5) — cursor-based per TRD §10.1, URL-held, opaque cursor, cursor reset on filter change, server-provided depth, explicit Next/Previous, one `Pagination` primitive. Added §23: the fixed screen inventory mapped to routes, features and roles; the application shell with always-visible queue depth; the two-panel login screen with generic `401` copy, rate-limit handling, validated redirect intent and no self-service account flows; role-shaped navigation with absent-not-disabled affordances; and the admin area rules for explicit rule activation, non-optimistic scope changes, write-only camera credentials, plain-language retention, no user-activity surfaces, read-only audit and honest health states. Extended the project structure and primitive roadmap; added screen-level tests and Definition-of-Done items. Renumbered §23–§26 to §24–§27. | — |
 | 1.2 | 8 Aug 2026 | Added routing and URL state (§8), forms and user input (§10), display formatting and time (§13), performance and payload (§16), environment and configuration (§19). Extended accessibility with landmarks, shortcut scoping, reduced motion and a manual keyboard gate; added absence-test and optimistic-failure-path testing rules; added the implied-dependency register (§21.4) and import-order, cycle, env and bundle-budget lint ownership. Narrowed the optimistic-update scope against BR-004 and extended §17 with BR-R-03 visibility. | — |
 | 1.1 | 8 Aug 2026 | Replaced arbitrary structural limits with review signals; clarified contract ownership, safe type exceptions and abstraction policy; corrected optimistic rollback and button loading examples; added frontend security/privacy, accurate lint ownership, production-build and supply-chain gates; aligned testing with TRD §19. | — |
 | 1.0 | 8 Aug 2026 | Initial standard. Structure, types-first workflow, primitives layer, reuse policy, defensive-check policy, Rule Book enforcement in UI, mechanical enforcement config. | — |
 
 ---
 
-## 26. Sign-off
+## 27. Sign-off
 
 | Role | Name | Confirms | Date |
 |---|---|---|---|

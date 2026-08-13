@@ -25,6 +25,9 @@ if [ -f .env ]; then set -a; . ./.env; set +a; fi
 
 VENV=.venv/bin
 TENANT="${GL_DEMO_TENANT:-pilot}"
+# The review-UI port. Overridable (GL_WEB_PORT in .env) for machines where
+# another project's dev server owns 5173; keep GL_CORS_ORIGINS in step.
+WEB_PORT="${GL_WEB_PORT:-5173}"
 ADMIN_EMAIL="${GL_DEMO_ADMIN_EMAIL:-admin@guardianlens.local}"
 PG_USER="${POSTGRES_USER:-guardian}"
 PG_PASS="${POSTGRES_PASSWORD:-guardian}"
@@ -147,7 +150,7 @@ else:
     print(f"    bootstrapped {email} (site 'Dev Plant')")
 PY
 
-echo "==> [5/5] API :8000 + web :5173"
+echo "==> [5/5] API :8000 + web :${WEB_PORT}"
 # Always reconcile web dependencies — agents and teammates add packages,
 # and a dev server running against stale node_modules fails with confusing
 # compile errors. With a matching lockfile this is a ~0.5s no-op.
@@ -183,20 +186,21 @@ free_port() {
   fi
 }
 free_port 8000 "guardian_lens.api"
-free_port 5173 "vite"
+free_port "$WEB_PORT" "vite.*--port ${WEB_PORT}"
 
 cleanup() { kill 0 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
 mkdir -p var
 $VENV/python -m guardian_lens.api &
-(cd web && npx vite --port 5173 --strictPort >../var/web-dev.log 2>&1) &
+(cd web && VITE_API_URL="${VITE_API_URL:-http://localhost:8000}" \
+  npx vite --port "$WEB_PORT" --strictPort >../var/web-dev.log 2>&1) &
 
 sleep 2
 cat <<BANNER
 
   Guardian Lens is running.
-    Review UI   http://localhost:5173
+    Review UI   http://localhost:${WEB_PORT}
     API         http://localhost:8000/api/v1/health
     Login       ${ADMIN_EMAIL} / \$GL_BOOTSTRAP_PASSWORD (default guardian-dev-1)
 

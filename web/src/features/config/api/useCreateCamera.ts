@@ -15,6 +15,8 @@ export interface CreateCameraInput {
    * stored" and never re-displays the value.
    */
   readonly streamUrl: string;
+  /** Where the camera physically is — real installs need this on the record. */
+  readonly locationDescription: string | null;
 }
 
 /** ASSUMPTION A-10 — POST /cameras body { site_id, name, stream_url }. */
@@ -26,6 +28,7 @@ export const useCreateCamera = () => {
         site_id: input.siteId,
         name: input.name,
         stream_url: input.streamUrl,
+        location_description: input.locationDescription,
       }),
     onSettled: () => {
       // CS-D-05 — invalidate precisely.

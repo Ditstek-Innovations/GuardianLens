@@ -52,6 +52,7 @@ This ensures a camera, zone and **explicitly activated** rule exist (activation 
 | `make up` / `make down` | Just the database / stop everything and delete the volume |
 | `make migrate-control` | Control schema to head |
 | `make provision TENANT=acme` | Provision a tenant (code path only — never by hand) |
+| `make onboard TENANT=… ADMIN_EMAIL=… ADMIN_NAME=… SITE_NAME=… TZ=…` | Going real (§3b): fresh attested tenant + first admin, no demo data |
 | `make attest TENANT=<url>` | FF-11: verify every constraint and trigger is present and enabled |
 | `make bypass` | The business-rule bypass suite (TRD §19.4) |
 | `make e2e` | The full-workflow test (§5 below) |
@@ -124,23 +125,46 @@ detection: a real model reaches a site only through gate **G1**
 |---|---|
 | 1 | `make run` — on first run it generates `GL_CAMERA_KEY` into `.env`. The same key must be present wherever the edge agent runs: the control plane **seals** camera credentials with it and cannot read them back; the edge **unseals** them in memory only |
 | 2 | No physical camera? `make camera-sim` — a synthetic RTSP test pattern at `rtsp://localhost:8554/cam1` ([TRD.md](TRD.md) §13.2). Stream-loss testing = `docker stop gl-rtsp-feed` |
-| 3 | In the UI (site_admin): Administration → Cameras → add the camera with its RTSP URL (`rtsp://user:pass@host/stream`). The credential is sealed on save and never returned by any API |
-| 4 | Zones & rules: draw the zone, create the rule, **activate it** — activation is attributed (BR-C-02) |
-| 5 | Run the edge agent in live mode. Secrets come from the environment, never argv: `GL_AGENT_CREDENTIAL` (`slug:agent_id:secret`), `GL_CAMERA_KEY`, `GL_CAMERA_KEY_ID`. Then: `python -m guardian_lens_edge --source rtsp --api http://localhost:8000 --agent-id <uuid> --site <uuid> --outbox-warning-bytes … --outbox-critical-bytes … --failure-window … --degraded-failure-rate … --halt-failure-rate … --decode-failure-threshold …` — the threshold flags are `[OPEN]` product values (OQ-4 / MOD-1), so they are **required with no defaults**; state them per deployment. The agent pulls config, unseals stream URLs in memory only, samples at each camera's `sample_rate_fps`, reconnects with 1→60 s backoff, and records a `stream_lost` coverage gap on any interruption — including a camera that never connects |
-| 6 | Verify honesty before trusting anything else: kill the stream and watch the gap open in Reports; restore it and watch the gap close. "We were not watching" must be visible — that is the property this step exists to prove |
+| 3 | In the UI (site_admin): Administration → Configuration → **Cameras** → register the camera with its RTSP URL (`rtsp://user:pass@host/stream`). Registration is a confirmed submit (CS-AD-03); the credential is sealed on save and never returned by any API |
+| 4 | Same screen, **Edge agents** → register the agent at its site (confirmed submit). The one-time composite credential (`slug:agent_id:secret`) is shown exactly once — copy it to the device now; the server stores only its Argon2 hash. The agent's id for step 6 is in the list below the form |
+| 5 | **Zones** → create the zone on the camera (full-frame at MVP; polygon drawing is a refinement) — confirmed submit. **Detection rules** → create the rule (created inactive, always — BR-001), then **Activate** it — activation is its own confirmed, attributed act (BR-C-02) |
+| 6 | Run the edge agent in live mode. Secrets come from the environment, never argv: `GL_AGENT_CREDENTIAL` (the step-4 credential), `GL_CAMERA_KEY`, `GL_CAMERA_KEY_ID`. Then: `python -m guardian_lens_edge --source rtsp --api http://localhost:8000 --agent-id <uuid> --site <uuid> --outbox-warning-bytes … --outbox-critical-bytes … --failure-window … --degraded-failure-rate … --halt-failure-rate … --decode-failure-threshold …` — the threshold flags are `[OPEN]` product values (OQ-4 / MOD-1), so they are **required with no defaults**; state them per deployment. The agent pulls config, unseals stream URLs in memory only, samples at each camera's `sample_rate_fps`, reconnects with 1→60 s backoff, and records a `stream_lost` coverage gap on any interruption — including a camera that never connects |
+| 7 | Verify honesty before trusting anything else: kill the stream and watch the gap open in Reports; restore it and watch the gap close. "We were not watching" must be visible — that is the property this step exists to prove |
 
 **Not answered by step 5, by design:** cameras per device (`[OPEN — OQ-9]`,
 benchmark on target hardware); detection accuracy (gate G1, labelled site
 footage). The `edge-camera` dependency extra (`pip install -e ".[edge-camera]"`)
 carries OpenCV and is needed only where real streams are decoded.
 
+## 3b. Going real — a clean tenant, no demo data
+
+The `pilot` tenant is the development sandbox: `make run` bootstraps a dev
+admin into it and `make edge-demo` seeds synthetic configuration and events
+there. **A real site never shares a database with any of that** — isolation
+is physical (ADR-016), so "no mock data" is a provisioning decision, not a
+cleanup job. Every row in a real tenant exists because a person or a real
+camera put it there.
+
+| Step | Command / action |
+|---|---|
+| 1 | `make onboard TENANT=<slug> ADMIN_EMAIL=<email> ADMIN_NAME='<Full Name>' SITE_NAME='<Plant name>' TZ=<Area/City>` — provisions a fresh tenant database through the production code path (create → migrate → seed reference data → **FF-11 attest** → activate) and bootstraps the first admin with the real site. `GL_BOOTSTRAP_PASSWORD` must be exported; the admin changes it after first sign-in |
+| 2 | Sign in as that admin at the review UI. The tenant is empty except the bootstrapped site — no demo camera, no synthetic events, no `demo-edge` agent |
+| 3 | Follow §3a steps 2–7 with the real hardware: register the real cameras (name, location, RTSP URL), register the real edge device, create zones and rules, activate explicitly, run the edge agent on the site box with the stated `[OPEN]` thresholds |
+| 4 | **Never run `make edge-demo` against this tenant.** It prints a DEMO-DATA warning and targets `GL_DEMO_TENANT` (default `pilot`) — leave that default alone on machines that also touch real tenants |
+| 5 | What the queue then holds is real: frames captured from the real stream, events created by activated rules, decisions carrying real reviewer names, coverage gaps recording real interruptions. Reports draw only from those verified records (BR-004/BR-005) |
+
+Until gate G1 admits a model (card, datasheet, measured evaluation —
+[GOVERNANCE.md](GOVERNANCE.md) §9), a real camera proves **stream honesty**,
+not detection: frames flow, gaps are recorded, nothing is claimed. That is
+the correct MVP posture, not a limitation to work around.
+
 ## 4. What exists, and what does not yet
 
 | Plane | State | Where |
 |---|---|---|
 | Data layer — 2 schemas, 10+1 migrations, every constraint | ✅ | `migrations/` |
-| Control plane — auth, tenancy router, ingest, review, decision, reports, config, audit, health, the seven guards, bootstrap CLI | ✅ | `src/guardian_lens/` |
-| Review UI — login, keyboard-first queue, evidence-gated decisions, reports with gaps, config | ✅ | `web/` |
+| Control plane — auth, tenancy router, ingest, review, decision, reports, config (incl. agent-principal and gate-G1 model-version registration), audit, health, the seven guards, bootstrap CLI | ✅ | `src/guardian_lens/` |
+| Review UI — login, keyboard-first queue, evidence-gated decisions, reports with verified-only analysis (bar-by-dimension, decision mix, gaps), config incl. edge-agent registration with one-time credential reveal; CS-AD-03 confirmations on camera/agent registration and sign-out | ✅ | `web/` |
 | Edge agent — deterministic pipeline, outbox, publisher, config sync, state machine, live multi-camera RTSP mode | ✅ | `src/guardian_lens_edge/` |
 | **Real detector (ONNX)** | 🟡 `OnnxDetector` implemented (manifest + SHA-256 artefact verification before load, YOLO decode, NMS) but it refuses any unverified artefact — and no admitted artefact exists | Gate **G1** blocks any model reaching any site — a model card, datasheet and measured evaluation must exist first ([GOVERNANCE.md](GOVERNANCE.md) §9). RTSP mode runs `NullDetector` |
 | **RTSP / live camera ingestion** | ✅ `--source rtsp`: threaded multi-camera capture, sealed-credential unsealing, reconnect with capped backoff, honest `stream_lost` / `stream_degraded` reporting | §3a above; verified live against `make camera-sim` (mediamtx + ffmpeg). Real-hardware scale is `[OPEN — OQ-9]` |
@@ -149,18 +173,18 @@ carries OpenCV and is needed only where real streams are decoded.
 
 ## 5. How this is tested
 
-**419 automated checks** across six suites (`make test` runs them all):
+**386 automated checks** across six suites (`make test` runs them all; counts as of 2026-08-13, v1.2):
 
 | Suite | Count | Proves |
 |---|---|---|
 | `tests/bypass/` | 43 | Every ABSOLUTE rule is unviolable **via direct SQL** — the suite that TRD §19.4 says must never fail |
-| `tests/api/` | 106 | The API rows of the bypass suite, D2 ladder, atomic audit, cross-tenant/site isolation, token rotation |
-| `tests/edge/` | 104 | D1 boundary cases, outbox state machine, backpressure halts loudly, publisher retry/park ladder |
+| `tests/api/` | 126 | The API rows of the bypass suite, D2 ladder, atomic audit, cross-tenant/site isolation, token rotation, agent/model-version registration (one-time credential, G1 evidence gates) |
+| `tests/edge/` | 163 | D1 boundary cases, outbox state machine, backpressure halts loudly, publisher retry/park ladder, RTSP capture (2 of these need `make camera-sim` and skip without it) |
 | `tests/unit/` | 28 | URL handling, enforcement-registry invariants |
-| `tests/integration/` + `tests/migrations/` | 36 | Audit atomicity, concurrent decisions, clean instance, query plans, reversibility, provisioning lifecycle |
+| `tests/integration/` + `tests/migrations/` | 24 | Audit atomicity, concurrent decisions, clean instance, query plans, reversibility, provisioning lifecycle |
 | `tests/e2e/` | 2 | **The whole loop, through the real code path of all three planes at once** — provision → bootstrap → configure → activate → edge scenario → ingest → queue → evidence → decide → 409 on the second decision → verified-only report → audit trail |
 
-Plus, per run: FF-11 attestation, bandit, `tsc --noEmit`, the web build, and 15 vitest UI tests. CI ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs everything and additionally **fails any pull request that modifies rule enforcement and the bypass suite together** (GOVERNANCE §8.2 as a build failure).
+Plus, per run: FF-11 attestation, bandit, `tsc --noEmit`, the web build, and 79 vitest UI tests across 15 files. CI ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs everything and additionally **fails any pull request that modifies rule enforcement and the bypass suite together** (GOVERNANCE §8.2 as a build failure).
 
 ## 6. Contract decisions made during integration
 
@@ -181,7 +205,7 @@ Three planes were built in parallel from [TRD.md](TRD.md) §10; where §10 was s
 
 | # | Gap | Consequence | Follow-up |
 |---|---|---|---|
-| 1 | **Agent principals and model versions have no API** — `edge-demo` and the E2E seed them by direct SQL | Operator step where an endpoint belongs | `POST /api/v1/agents` (site_admin) and model registration wired to gate G1 evidence |
+| 1 | ~~Agent principals and model versions have no API~~ **Closed 2026-08-13**: `GET`/`POST /api/v1/agents` (one-time composite credential, Argon2-hashed at rest) and `GET`/`POST /api/v1/model-versions` + `/approve` (gate-G1 evidence refs required for approval), site_admin, audited, with a Configuration-screen section for agents. `edge-demo` still seeds by SQL for idempotent re-runs — an operator uses the API | — | TRD §10.6 v1.2, DATABASE.md §10.3 v1.4 |
 | 2 | JWT is **HS256** from `GL_JWT_SECRET`. (`cryptography` **is** installed and camera sealing is real AES-256-GCM once `make run` generates `GL_CAMERA_KEY`; the placeholder sealer remains only for key-less environments) | Fine for dev; not the TRD §12.2 production posture | Switch `services/tokens.py` to RS256 — a single swap point |
 | 3 | Migration `0010_refresh_tokens` is implemented but the table is not yet in [DATABASE.md](DATABASE.md) §5 | Spec lags code by one table | Recorded in DATABASE.md change log 1.2 with the spec — see [DATABASE.md](DATABASE.md) §5.13 |
 | 4 | Only the login rate limiter exists; other §12.7 tiers are commented where they belong | MVP-acceptable | With the first pilot |
@@ -201,3 +225,6 @@ Per BR-M-01 `[PROPOSED]` and AP-2, and because the detector is synthetic: **noth
 |---|---|---|---|
 | 1.0 | 2026-08-12 | Initial runbook: one-command run, edge demo, workflow narrative, contract decisions from the three-plane integration, gap register. | Kapil |
 | 1.1 | 2026-08-13 | §3a camera how-to gains the real `--source rtsp` CLI; §4 updated: live RTSP ingestion ✅, `OnnxDetector` implemented but G1-gated; §7 gap 2 narrowed to the RS256 swap (sealing is real AES-GCM now). | Kapil |
+| 1.2 | 2026-08-13 | §7 gap 1 closed: agent-principal + model-version APIs (TRD §10.6 v1.2, DATABASE.md §10.3 v1.4) with API tests. §4 updated: Reports carries the verified-only analysis view (single-hue bar by dimension, decision-mix bar, chart tokens per FRONTEND_CODING_STANDARDS §12.1); Configuration gains the edge-agents section; CS-AD-03 confirmations on camera/agent registration and sign-out. | Kuldeep |
+| 1.3 | 2026-08-13 | Real-camera readiness: zone and rule **creation** exist in the UI (zone = full-frame at MVP with a CS-AD-03 confirm; rules created inactive per BR-001, activation unchanged), so §3a is now executable end-to-end from the browser — its steps renumbered 1–7 with the agent-registration step added. Whole flow verified in-browser: camera → agent (one-time credential) → zone → inactive rule → attributed activation. §5 web test count 72. | Kuldeep |
+| 1.4 | 2026-08-13 | **§3b Going real**: `make onboard` (provision + FF-11 attest + first-admin bootstrap) gives a real site a physically isolated tenant carrying no demo data; edge-demo now prints a DEMO-DATA warning. UI completes site administration: site creation, camera location, **credential replace** (CS-AD-06's replace action) and camera disable/enable — all confirmed submits. §5 web test count 79. | Kuldeep |

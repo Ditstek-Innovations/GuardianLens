@@ -19,13 +19,20 @@ whether it arrives via POST /rules/{id}/activate or via PATCH
 
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
+from argon2 import PasswordHasher
 
-from guardian_lens.core.errors import NotFoundError, ScopeError, ValidationFailureError
+from guardian_lens.core.errors import (
+    DuplicateResourceError,
+    NotFoundError,
+    ScopeError,
+    ValidationFailureError,
+)
 from guardian_lens.core.principal import HumanPrincipal
 from guardian_lens.guards.default_off import DefaultOffGuard
 from guardian_lens.repositories.config import ConfigRepository
@@ -39,6 +46,9 @@ __all__ = ["ConfigurationService"]
 _ZONE_NOT_FOUND = "zone not found"
 _RULE_NOT_FOUND = "rule not found"
 
+# Argon2id, the same scheme agent_login verifies against (services/identity).
+_credential_hasher = PasswordHasher()
+
 
 class ConfigurationService:
     def __init__(
@@ -51,6 +61,7 @@ class ConfigurationService:
         self._config = ConfigRepository(context.session)
         self._audit = audit
         self._sealer = sealer
+        self._tenant_slug = context.tenant_slug
 
     # -- sites ---------------------------------------------------------------
 
@@ -442,6 +453,153 @@ class ConfigurationService:
         self._config.bump_config_version(site_id)
         self._session.commit()
         return rule  # type: ignore[return-value]
+
+    # -- edge agents (WORKFLOW.md 7 gap 1) -----------------------------------
+
+    def register_agent(
+        self,
+        principal: HumanPrincipal,
+        *,
+        site_id: UUID,
+        name: str,
+        ip_address: str | None,
+    ) -> tuple[sa.Row, str]:
+        """Register an edge agent principal at one site.
+
+        Returns the row and the composite credential ``slug:agent_id:secret``
+        — the /auth/agent exchange format — exactly once. Only the Argon2
+        hash is stored; the server cannot reproduce the secret afterwards.
+        An agent principal can never hold a review role (BR-S-02, 0003:
+        the grant relation does not exist).
+        """
+        self._ensure_site_scope(principal, site_id)
+        secret = secrets.token_hex(24)
+        agent = self._config.insert_agent(
+            {
+                "site_id": site_id,
+                "name": name,
+                "credential_hash": _credential_hasher.hash(secret),
+            }
+        )
+        self._audit.write(
+            action="agent.registered",
+            entity_type="agent",
+            actor_user_id=principal.user_id,
+            entity_id=agent.id,
+            # Allowlisted fields only — never credential material
+            # (DATABASE.md 10.4).
+            after_state={
+                "site_id": str(site_id),
+                "name": name,
+                "status": agent.status,
+            },
+            ip_address=ip_address,
+        )
+        self._session.commit()
+        return agent, f"{self._tenant_slug}:{agent.id}:{secret}"
+
+    def list_agents(self, principal: HumanPrincipal) -> list[sa.Row]:
+        return list(self._config.list_agents(sorted(principal.site_ids())))
+
+    # -- model versions (gate G1 evidence trail) -----------------------------
+
+    def register_model_version(
+        self,
+        principal: HumanPrincipal,
+        *,
+        version: str,
+        artefact_hash: str,
+        classes: list[str],
+        training_data_hash: str | None,
+        model_card_ref: str | None,
+        datasheet_ref: str | None,
+        notes: str | None,
+        ip_address: str | None,
+    ) -> sa.Row:
+        """Record a model version and its G1 evidence references.
+
+        Registration is not deployment: deployed_at stays NULL and cannot be
+        set without a recorded approval (chk_model_deployed_requires_approval,
+        0004). Versions are immutable identity — a duplicate is a conflict,
+        never an overwrite (events reference versions as evidence).
+        """
+        if self._config.model_version_id(version) is not None:
+            raise DuplicateResourceError(
+                f"model version '{version}' is already registered",
+                field="version",
+            )
+        row = self._config.insert_model_version(
+            {
+                "version": version,
+                "artefact_hash": artefact_hash,
+                "classes": classes,
+                "training_data_hash": training_data_hash,
+                "model_card_ref": model_card_ref,
+                "datasheet_ref": datasheet_ref,
+                "notes": notes,
+            }
+        )
+        self._audit.write(
+            action="model.registered",
+            entity_type="model_version",
+            actor_user_id=principal.user_id,
+            entity_id=row.id,
+            after_state={
+                "version": version,
+                "artefact_hash": artefact_hash,
+                "classes": classes,
+                "model_card_ref": model_card_ref,
+                "datasheet_ref": datasheet_ref,
+            },
+            ip_address=ip_address,
+        )
+        self._session.commit()
+        return row
+
+    def list_model_versions(self, principal: HumanPrincipal) -> list[sa.Row]:
+        del principal  # role-gated at the route; versions are tenant-global
+        return list(self._config.list_model_versions())
+
+    def approve_model_version(
+        self, principal: HumanPrincipal, model_version_id: UUID, ip_address: str | None
+    ) -> sa.Row:
+        """Record the named G1 approver — GOVERNANCE.md 9.
+
+        Approval requires the model card AND datasheet references to exist:
+        an approval with nothing to have reviewed is not evidence. The
+        approver comes from the token; there is no parameter for it
+        (the BR-C-02 pattern).
+        """
+        before = self._config.get_model_version(model_version_id)
+        if before is None:
+            raise NotFoundError("model version not found")
+        if before.approved_by is not None:
+            raise DuplicateResourceError("model version is already approved")
+        if before.model_card_ref is None or before.datasheet_ref is None:
+            raise ValidationFailureError(
+                "approval requires a model card and a dataset datasheet "
+                "reference (gate G1, GOVERNANCE.md 9)",
+                field="model_card_ref",
+            )
+        approved_at = datetime.now(timezone.utc)
+        row = self._config.update_model_version(
+            model_version_id,
+            {"approved_by": principal.user_id, "approved_at": approved_at},
+        )
+        self._audit.write(
+            action="model.approved",
+            entity_type="model_version",
+            actor_user_id=principal.user_id,
+            entity_id=model_version_id,
+            before_state={"approved_by": None},
+            after_state={
+                "approved_by": str(principal.user_id),
+                "approved_at": approved_at.isoformat(),
+            },
+            ip_address=ip_address,
+        )
+        self._session.commit()
+        return row  # type: ignore[return-value]
 
     # -- agent config pull (IF-X1) -------------------------------------------
 

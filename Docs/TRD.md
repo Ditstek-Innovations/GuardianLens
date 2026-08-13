@@ -1406,7 +1406,10 @@ Returns CSV or PDF with a provenance header stating period, generating user and 
 | `/api/v1/retention` | GET, PUT | site_admin | `[V1]` |
 | `/api/v1/users` | GET, POST, PATCH | site_admin | `[V1]` |
 | `/api/v1/audit` | GET | auditor | `[V1]` |
+| `/api/v1/agents` | GET, POST | site_admin | Edge-agent principals. POST returns the composite credential (`slug:agent_id:secret`) exactly once; only its Argon2 hash is stored `[MVP]` |
 | `/api/v1/agents/{id}/config` | GET | agent | Config pull `[MVP]` |
+| `/api/v1/model-versions` | GET, POST | site_admin | Gate-G1 evidence trail: registration records artefact hash, classes, model card and datasheet references. Registration is not deployment `[MVP]` |
+| `/api/v1/model-versions/{id}/approve` | POST | site_admin | Explicit approval, approver from the token (no body). Requires card + datasheet references; deployment without approval stays impossible (`chk_model_deployed_requires_approval`) `[MVP]` |
 
 ## 10.7 Health
 
@@ -2406,6 +2409,7 @@ Twenty-four risks across technical, AI, operational and security categories (§2
 
 | Version | Date | Change | Author | Tier |
 |---|---|---|---|---|
+| 1.2 | 2026-08-13 | §10.6 gains the agent-principal and model-version registration endpoints (`/agents` GET+POST, `/model-versions` GET+POST, `/model-versions/{id}/approve` POST, all site_admin) — WORKFLOW.md §7 gap 1 closed. One-time credential contract and gate-G1 evidence requirements stated in the table. | Kuldeep | — |
 | 1.0 | 2026-07-31 | Initial technical requirement document | Kapil | — |
 | 1.1 | 2026-08-12 | **Isolated multi-tenancy.** New **TD-018** — database per tenant, where a tenant is a customer organisation. §2 and §8–9 marked as summary views of [ARCHITECTURE.md](ARCHITECTURE.md) and [DATABASE.md](DATABASE.md). §2.3 production topology, §8 entities, §12.1 trust boundaries, §13.4 production infrastructure, §18.1 and §18.3 scaling limits, and §19.4 bypass suite updated for per-tenant databases. TD register migration to ADRs scheduled rather than performed inline. | Kapil | **T3** — touches enforcement points in [RULE_BOOK.md](RULE_BOOK.md) §6 |
 

@@ -28,11 +28,36 @@ export const MESSAGES = {
       `Rule inactive — “${ruleName}” is no longer monitored. The change is recorded under your name.`,
     ruleChangeFailed:
       'The rule change was not applied. Check the connection and try again — monitoring is unchanged.',
+    /** The creator's grant is part of the transaction (site.created audit). */
+    siteSaved: 'Site created — you hold site admin there, recorded under your name.',
+    siteSaveFailed:
+      'The site was not created. Check the connection and try again — nothing was stored.',
     /** BR-S-03 / CS-AD-06 — the credential is write-only, stated plainly. */
     cameraSaved: 'Camera saved — the stream credential is stored and never shown again.',
     cameraSaveFailed:
       'The camera was not saved. Check the connection and try again — nothing was stored.',
+    cameraCredentialReplaced:
+      'Credential replaced — the new stream credential is sealed and never shown again.',
+    cameraCredentialReplaceFailed:
+      'The credential was not replaced. Check the connection and try again — the previous credential is unchanged.',
+    cameraDisabled: (cameraName: string): string =>
+      `Camera disabled — “${cameraName}” is no longer watched from the next edge sync.`,
+    cameraEnabled: (cameraName: string): string =>
+      `Camera enabled — “${cameraName}” is watched again from the next edge sync.`,
+    cameraStatusChangeFailed:
+      'The camera change was not applied. Check the connection and try again — monitoring is unchanged.',
     zoneSaved: 'Zone saved — its rules apply from the next edge sync.',
+    zoneSaveFailed:
+      'The zone was not saved. Check the connection and try again — nothing was stored.',
+    /** BR-001 — creation is inert; activation is a separate, confirmed act. */
+    ruleCreated:
+      'Rule created inactive — nothing is monitored until you activate it explicitly.',
+    ruleCreateFailed:
+      'The rule was not created. Check the connection and try again — nothing was stored.',
+    /** The one-time credential contract, stated at the moment it matters. */
+    agentRegistered: 'Agent registered — copy its credential now; it is never shown again.',
+    agentRegisterFailed:
+      'The agent was not registered. Check the connection and try again — nothing was stored.',
   },
   reports: {
     /** BR-R-02 — provenance rides along in the exported file. */

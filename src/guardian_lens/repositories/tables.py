@@ -131,7 +131,14 @@ model_versions = sa.Table(
     sa.Column("id", _uuid, primary_key=True, server_default=_DB_GENERATED),
     sa.Column("version", sa.String(40)),
     sa.Column("artefact_hash", sa.Text),
+    sa.Column("training_data_hash", sa.Text),
     sa.Column("classes", JSONB),
+    sa.Column("model_card_ref", sa.Text),
+    sa.Column("datasheet_ref", sa.Text),
+    sa.Column("approved_by", _uuid),
+    sa.Column("approved_at", _ts),
+    sa.Column("deployed_at", _ts),
+    sa.Column("notes", sa.Text),
 )
 
 events = sa.Table(

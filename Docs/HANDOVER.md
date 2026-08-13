@@ -145,3 +145,4 @@ is a feature, with the authority in brackets.
 | Version | Date | Change | Author |
 |---|---|---|---|
 | 1.0 | 2026-08-13 | Initial handover: uncommitted-state warning, reading order and authority, repo map, verification evidence, invariants, ordered next steps. | Kapil |
+| 1.1 | 2026-08-13 | Post-handover work landed (uncommitted, same tree): panel shell + configuration redesign; Reports analysis view; WORKFLOW §7 gap 1 closed (agent + model-version APIs, G1 evidence gates); zone/rule creation in the UI, making WORKFLOW §3a executable end-to-end from the browser; CS-AD-03 confirmations. §5 evidence superseded by WORKFLOW §5 v1.3 (386 Python checks, 72 web). Companion versions: TRD 1.2, DATABASE 1.4, WORKFLOW 1.3. | Kuldeep |

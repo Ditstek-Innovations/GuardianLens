@@ -18,6 +18,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from guardian_lens.repositories.tables import (
+    agents,
     cameras,
     coverage_gaps,
     detection_rules,
@@ -27,6 +28,21 @@ from guardian_lens.repositories.tables import (
 )
 
 __all__ = ["ConfigRepository"]
+
+#: Agent columns safe for any response or audit path. credential_hash is
+#: deliberately absent — the secret is returned exactly once at registration
+#: and its hash never leaves the repository (TRD 12.4 discipline).
+_AGENT_PUBLIC = [
+    agents.c.id,
+    agents.c.site_id,
+    agents.c.name,
+    agents.c.status,
+    agents.c.last_seen_at,
+    agents.c.last_health_at,
+    agents.c.agent_version,
+    agents.c.applied_config_version,
+    agents.c.clock_skew_ms,
+]
 
 #: Camera columns safe for any response or audit path. stream_url_encrypted
 #: is deliberately absent — it never leaves the repository except toward the
@@ -216,6 +232,47 @@ class ConfigRepository:
         return self._session.execute(
             sa.select(model_versions.c.id).where(model_versions.c.version == version)
         ).scalar_one_or_none()
+
+    # -- edge agents (WORKFLOW.md 7 gap 1) -----------------------------------
+
+    def insert_agent(self, values: dict[str, Any]) -> sa.Row:
+        return self._session.execute(
+            sa.insert(agents).values(**values).returning(*_AGENT_PUBLIC)
+        ).one()
+
+    def list_agents(self, site_ids: Sequence[UUID]) -> Sequence[sa.Row]:
+        return self._session.execute(
+            sa.select(*_AGENT_PUBLIC)
+            .where(agents.c.site_id.in_(list(site_ids)))
+            .order_by(agents.c.name)
+        ).all()
+
+    # -- model versions (gate G1 evidence trail) -----------------------------
+
+    def insert_model_version(self, values: dict[str, Any]) -> sa.Row:
+        return self._session.execute(
+            sa.insert(model_versions).values(**values).returning(model_versions)
+        ).one()
+
+    def get_model_version(self, model_version_id: UUID) -> sa.Row | None:
+        return self._session.execute(
+            sa.select(model_versions).where(model_versions.c.id == model_version_id)
+        ).one_or_none()
+
+    def list_model_versions(self) -> Sequence[sa.Row]:
+        return self._session.execute(
+            sa.select(model_versions).order_by(model_versions.c.version)
+        ).all()
+
+    def update_model_version(
+        self, model_version_id: UUID, values: dict[str, Any]
+    ) -> sa.Row | None:
+        return self._session.execute(
+            sa.update(model_versions)
+            .where(model_versions.c.id == model_version_id)
+            .values(**values)
+            .returning(model_versions)
+        ).one_or_none()
 
     # -- coverage gaps -------------------------------------------------------
 

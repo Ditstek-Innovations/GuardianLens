@@ -25,7 +25,7 @@ synthetic detector (`src/guardian_lens_edge/`). The real ONNX detector is
 gated on G1 and does not exist yet.
 
 ```bash
-make run          # ONE command: db + API (:8000) + review UI (:5173)
+make run          # ONE command: db + API (:8000) + review UI (:5173, or GL_WEB_PORT)
 make edge-demo    # second terminal: simulated site feeds the queue
 ```
 

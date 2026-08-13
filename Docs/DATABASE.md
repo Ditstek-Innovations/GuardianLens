@@ -1203,7 +1203,8 @@ The guarantee holds twice: `AuditRepository` exposes no update or delete method 
 | `retention.policy_changed` | MOD-10 | Days | Days |
 | `user.role_granted` / `.revoked` | MOD-12 | Role, site — via `entity_key` (§5.10.1) | Same |
 | `user.created` / `.deactivated` | MOD-12 | Allowlisted — **never** `password_hash` | Same |
-| `model.registered` / `.deployed` | MOD-10 | Version, hashes, approver | Same |
+| `agent.registered` | MOD-10 | — | Site, name, status — **never** `credential_hash` |
+| `model.registered` / `.approved` / `.deployed` | MOD-10 | Version, hashes, approver | Same |
 | `auth.login_failed` (repeated) | MOD-12 | — | Attempt metadata |
 
 **Every row above is written in the same transaction as the change it records.** BR-AU-03 and BR-C-01 `[PROPOSED]`: a change that cannot be audited must not take effect.
@@ -2197,6 +2198,7 @@ CREATE TABLE control_audit_log (
 
 | Version | Date | Change | Author | Reviewed by |
 |---|---|---|---|---|
+| 1.4 | 2026-08-13 | §10.3 audit table gains `agent.registered` (after-state site/name/status, never `credential_hash`) and `model.approved` alongside `model.registered`, matching the agent/model-version registration API (WORKFLOW.md §7 gap 1 closed). The audit writer's per-entity allowlist gains the `model_version` entity accordingly. | Kuldeep | Kapil (owner) — pending |
 | 1.0 | 2026-08-08 | Initial database design. Four-store data architecture, negative schema, physical schema with constraint and trigger specifications, PII map, retention mechanics, edge SQLite store, evidence store, migration strategy, volumetric model, backup and recovery, database access control, data-layer bypass suite. ADR-014 and ADR-015. Sixteen proposed TRD amendments in Appendix A. | — | — |
 | 1.3 | 2026-08-12 | §5.14 `password_reset_tokens` (migration 0011; single-use SHA-256, reset revokes all sessions) with its constraints registered for FF-11. Self-service signup writes `user_directory` + a `system.user.signed_up` audit entry; signup is deployment-gated and grants no roles. | Kapil |
 | 1.2 | 2026-08-12 | §5.13 `refresh_tokens` (migration 0010, TRD §12.2 rotation + reuse detection). Deprovisioning now deletes the tenant's `user_directory` rows — the login directory must not outlive the tenant (defect found by the E2E workflow test; §13.5.2 sequence unchanged, directory cleanup added before the tombstone). | Kapil |

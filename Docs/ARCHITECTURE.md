@@ -1412,9 +1412,11 @@ The normative vocabulary is [RULE_BOOK.md](RULE_BOOK.md) §3.1 (terms) and §3.2
 
 ---
 
-# Appendix A — Amendments proposed to the TRD
+# Appendix A — Proposed amendments to other controlled documents
 
-**These are not edits.** [GOVERNANCE.md](GOVERNANCE.md) §19.1 assigns [TRD.md](TRD.md) to Kapil under ADR + T2/T3 change control. Each item below is a proposed amendment for the owner to accept, reject or defer. Rejections should be recorded, not discarded ([GOVERNANCE.md](GOVERNANCE.md) §8.3).
+## A.1 — To the TRD
+
+[GOVERNANCE.md](GOVERNANCE.md) §19.1 assigns [TRD.md](TRD.md) to Kapil under ADR + T2/T3 change control. Each item below is a proposed amendment for the owner to accept, reject or defer. Rejections should be recorded, not discarded ([GOVERNANCE.md](GOVERNANCE.md) §8.3).
 
 | ID | TRD ref | Issue | Proposed amendment | Tier |
 |---|---|---|---|---|
@@ -1428,6 +1430,16 @@ The normative vocabulary is [RULE_BOOK.md](RULE_BOOK.md) §3.1 (terms) and §3.2
 | **AMD-ARCH-08** | §5.6, §9.7 | `agent_down` is a `coverage_gaps` reason, but a dead agent cannot write it. Nothing states that the control plane infers it from missed health beats, or that gap resolution is bounded by the beat interval | State the inference and its resolution limit in §5.6 and §9.7 | T1 |
 | **AMD-ARCH-09** | §3, §12.8 | Prohibited capabilities (BR-002/003/006, BR-P-01) are assigned to "dependency review" and "code review" with no executable check | Adopt ADR-011; add FF-5 and FF-6 to the §12.8 activity table | **T3** — touches ABSOLUTE-rule enforcement |
 | **AMD-ARCH-10** | §1.3, §17 | Quality attributes are ranked but not stated in testable form; §17 asserts no numbers, correctly, but leaves no scenario structure to fill once measurements exist | Mark §1.3 as a summary view of ARCHITECTURE.md §10.2, so pilot measurements have a defined home | T1 |
+
+## A.2 — To GOVERNANCE
+
+[GOVERNANCE.md](GOVERNANCE.md) is **Kuldeep's**, not the TRD owner's, so this cannot be applied alongside an engineering change and is raised here.
+
+| ID | GOVERNANCE ref | Issue | Proposed amendment | Tier |
+|---|---|---|---|---|
+| **AMD-GOV-01** | §19.1, controlled set | On 2026-08-12 the repository gained an implementation — migrations, the rule-to-constraint registry, the FF-11 attestation and the bypass suite — alongside `Docs/`. §19.1 defines the controlled set as RULE_BOOK, GOVERNANCE, PRD, TRD, ADRs, model cards, datasheets, registers and the research set. **Source code is not on that list**, so the repository is now something the governance document does not describe | Add a row to the §19.1 table: *"Implementation (migrations, enforcement registry, bypass suite) — Owner Kapil — Change control per §8.2, T3 where it touches a §6 enforcement point."* The alternative — a separate implementation repository — was considered and rejected, because docs-as-code only stays literal while a migration and the amendment to [DATABASE.md](DATABASE.md) that justifies it can land in one pull request | **SARB review** |
+
+> **Why this is raised rather than assumed.** Adding code silently changes what the repository *is*, and [GOVERNANCE.md](GOVERNANCE.md) §19.1 is the document that says what it is. Ownership of the TRD authorises engineering changes; it does not extend to redefining the controlled set. The code is in the repository and working — this amendment makes the governance document say so.
 
 ---
 

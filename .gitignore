@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# TRD 12.5 — no secret is committed to the repository at any phase.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+var/

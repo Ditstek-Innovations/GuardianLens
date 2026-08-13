@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document | Coding Standards (Frontend — React + TypeScript) |
-| Version | 1.3 |
+| Version | 1.6 |
 | Status | Draft for review |
 | Programme phase | Week 3 — Govern · 8 August 2026 |
 | Applies to | `web/` — the Review Web App (TRD §7). Backend Python standards are a separate document. |
@@ -744,6 +744,81 @@ Before writing a check, ask: **"What type would make this check impossible to ne
 | **CS-Y-06** | Class order is enforced by `prettier-plugin-tailwindcss`. Do not hand-order. |
 | **CS-Y-07** | Dark mode via the `dark:` variant on semantic tokens. Never a duplicated component. |
 | **CS-Y-08** | Every interactive element has a visible `focus-visible` ring. Removing focus outlines is banned — NFR-ACC-01 depends on them. |
+| **CS-Y-09** | Tokens are defined ONCE as CSS custom properties in `styles/tokens.css`; the Tailwind theme reads `var()`s from it. **Dark is the default theme**; light is the `light` class variant. A hex literal outside `tokens.css` is a defect (CS-Y-04). |
+| **CS-Y-10** | Type, radius, elevation and motion come from the §12.1 scales only. An arbitrary shadow, radius or duration is banned exactly as an arbitrary colour is. |
+| **CS-Y-11** | Chart series and stat-tile accents use the §12.1 categorical palette in its **fixed order, never cycled**, and never repurpose status colours as series. Any change to those hex values must be re-validated for CVD separation, lightness band and surface contrast in BOTH themes, with the validator output quoted in the PR. |
+| **CS-Y-12** | Motion is micro and functional: 120–160 ms ease-out for state feedback, 240 ms for panels, nothing longer on the review path, everything gated behind `prefers-reduced-motion` (CS-A). Decorative animation is banned on authenticated screens (CS-SH-08). |
+| **CS-Y-13** | Loading, empty and error are **designed states** rendered through the `Skeleton` / `EmptyState` / `ErrorState` primitives — never a blank region, never layout shift on resolve (ties CS-SC-03). |
+
+### 12.1 The design language
+
+One look, stated once. Values live in `styles/tokens.css`; this table is their
+specification. The product is a monitoring surface used in long sessions —
+**dark-first, calm neutrals, one confident accent, colour reserved for meaning.**
+
+**Surfaces & ink** *(dark default / light variant)*
+
+| Token | Dark | Light |
+|---|---|---|
+| `bg` | `#0B0F14` | `#F7F9FB` |
+| `surface-1 / 2 / 3` | `#11161D` / `#161D26` / `#1D2530` | `#FFFFFF` / `#F1F4F7` / `#E8EDF2` |
+| `border` / `border-strong` | `#273240` / `#35424F` | `#D9E0E7` / `#C3CDD7` |
+| `fg` / `fg-muted` / `fg-faint` | `#E8EDF2` / `#9AAABA` / `#64748B` | `#0C1420` / `#506070` / `#8494A4` |
+
+**Accent (brand)** — cyan, the "guardian" hue; never used for status:
+`300 #67E8F9 · 400 #22D3EE · 500 #06B6D4 · 600 #0891B2 · 700 #0E7490`.
+Interactive text: 300 on dark, 600 on light. Primary CTA: 500 fill, white ink,
+subtle 400 glow on dark (`0 0 24px -8px`). Focus ring: 400 at 2px offset.
+
+**Status** *(icon + text always; never colour alone — NFR-ACC-01)*:
+ok `#34D399`/`#059669` · warn `#FBBF24`/`#B45309` · danger `#F87171`/`#DC2626` —
+dark/light respectively, each with a `-subtle` translucent surface tint.
+
+**Categorical (charts & stat tiles)** — fixed order **emerald → violet → amber
+→ cyan → rose**, validated (CVD ΔE, lightness band, ≥3:1 surface contrast):
+dark `#059669 #8B5CF6 #D97706 #0891B2 #F43F5E` ·
+light `#059669 #7C3AED #D97706 #0891B2 #E11D48`.
+
+**Type** — `ui-sans-serif` system stack; metrics and timestamps in
+`tabular-nums`. Scale: 12 / 13 / 14 (base) / 16 / 18 / 22 / 28; headings
+semibold with `tracking-tight` at ≥22.
+
+**Radius** — controls 8, cards 12, modals 16, chips full.
+
+**Elevation** — dark: hairline border + ambient `0 8px 24px -16px #000`;
+light: layered soft shadow. No borderless floating cards on dark.
+
+**Density** — review surfaces compact (40 px rows); forms comfortable
+(44 px controls).
+
+**Brand mark** — one logo, drawn once as inline SVG in `components/ui/Logo.tsx`
+and mirrored byte-for-byte in `public/favicon.svg`: a **shield containing a
+lens** — the guardian and the lens, literally. Geometry: a rounded shield
+outline (2px stroke, `currentColor`), an iris circle centred in its upper
+two-thirds (2px stroke) with a filled pupil dot; nothing else. It must stay
+legible at 16 px. Colour: brand-400 on dark, brand-600 on light; the favicon
+ships with a dark-tile version so the tab reads in both browser themes. The
+mark appears in exactly three places — favicon, shell header, auth identity
+panel — always via the one component (never a second drawing).
+
+### 12.2 Voice — outcome messages and toasts
+
+Feedback is part of the record-keeping product: a reviewer must know what
+just became true. Two channels, never interchanged:
+
+| Channel | Carries | Never carries |
+|---|---|---|
+| **Inline field/form text** (CS-FM-03, CS-AU-04) | Validation and credential errors — persistent, focusable | Operation outcomes |
+| **Toast** (region mounted once by the shell, CS-SH-07) | Operation outcomes: what became true, and its consequence | Validation errors; anything the user must act on to proceed |
+
+| ID | Rule |
+|---|---|
+| **CS-MSG-01** | Every outcome message states **what became true and what it means**, in sentence case, no jargon, no exclamation marks. "Success" / "Failed" / "Error occurred" are banned strings. Pattern: *outcome — consequence*. |
+| **CS-MSG-02** | All user-facing outcome copy lives in one catalogue (`constants/messages.ts`), typed by operation. A component that inlines an outcome string is duplicating the catalogue. |
+| **CS-MSG-03** | Success toasts auto-dismiss (5 s, pausable on hover/focus); failure toasts persist until dismissed. Every toast is announced via the shell's single `aria-live` region — success `polite`, failure `assertive` — and is dismissible by keyboard. Max 3 stacked; oldest collapses. |
+| **CS-MSG-04** | Decision outcomes name the consequence on the record: an accept states the event is now a verified record carrying the reviewer's name (BR-005); a reject states it is retained in the rejection log (BR-007). Enumeration-safe screens (auth family) keep their §23.3 generic copy — a toast never adds detail the form was forbidden to reveal. |
+| **CS-MSG-05** | A failure toast says what to do next when there is a next thing ("Check the connection and try again", "It may already be decided — the queue has refreshed"), and never exposes status codes, trace ids or internal error text (CS-SEC-04). |
+
 
 ---
 
@@ -1000,6 +1075,9 @@ Every route in the application maps to exactly one row of TRD §7.1. **A screen 
 | ID | Screen | Route constant | Feature directory | Minimum role | Scope |
 |---|---|---|---|---|---|
 | SCR-1 | Login | `ROUTES.LOGIN` | `features/auth` | — (public) | `[MVP]` |
+| SCR-1a | Sign up | `ROUTES.SIGNUP` | `features/auth` | — (public) | `[MVP]` — deployment-gated, CS-AU-12 |
+| SCR-1b | Forgot password | `ROUTES.FORGOT_PASSWORD` | `features/auth` | — (public) | `[MVP]` |
+| SCR-1c | Reset password | `ROUTES.RESET_PASSWORD` | `features/auth` | — (public) | `[MVP]` |
 | SCR-2 | Review Queue — **home** | `ROUTES.QUEUE` | `features/review-queue` | `reviewer` | `[MVP]` |
 | SCR-3 | Candidate Detail | `ROUTES.CANDIDATE` | `features/review-queue` | `reviewer` | `[MVP]` |
 | SCR-4 | Event History | `ROUTES.HISTORY` | `features/event-history` | `reviewer` | `[MVP]` |
@@ -1056,9 +1134,15 @@ Every route in the application maps to exactly one row of TRD §7.1. **A screen 
 | **CS-SH-08** | Nothing in the shell interrupts the review path: no onboarding interstitial, no marketing modal, no notification pane covering the queue. The queue is home (TRD §7.2) and it opens ready to work. |
 | **CS-SH-09** | The header states the current principal and the current site, and offers sign-out. A reviewer whose name will appear on every record they verify (BR-005) must be able to see, at a glance, whose session they are working in. |
 
-### 23.3 SCR-1 — the login screen
+### 23.3 SCR-1 … SCR-1c — the authentication screens
 
-Login is a two-panel screen on `md` and above: **identity on the left, the form on the right.** The left panel says what the product is and what the person is signing in to; the right panel does exactly one thing. Below `md` the panel collapses to a compact header and the form takes the full width — the fields are never pushed below the fold on a phone.
+Four public screens — login, sign up, forgot password, reset password — and
+they are **one family**: a single `AuthLayout` renders the two-panel frame,
+the identity panel, and the background treatment; each screen contributes
+only its form. Two auth screens that disagree about their frame are two
+different applications on adjacent URLs.
+
+Each screen is a two-panel screen on `md` and above: **identity on the left, the form on the right.** The left panel says what the product is and what the person is signing in to; the right panel does exactly one thing. Below `md` the panel collapses to a compact header and the form takes the full width — the fields are never pushed below the fold on a phone.
 
 ```
 ┌────────────────────────────────┬──────────────────────────────────┐
@@ -1090,8 +1174,15 @@ Login is a two-panel screen on `md` and above: **identity on the left, the form 
 | **CS-AU-07** | The access token is held **in memory only**; the refresh credential follows CS-SEC-06. Tokens never go to `localStorage`. Refresh is single-flight and centralised in the API client (CS-D-13) — no component refreshes a session. |
 | **CS-AU-08** | On success, redirect to the route the user was trying to reach, captured as an internal path before the redirect to login and **validated as a same-origin relative path** (CS-SEC-05) — an open redirect on the login screen is a credential-phishing surface. With no captured intent, the destination is the review queue. |
 | **CS-AU-09** | On a `401` from any request, the API client clears the principal, clears the query cache and routes to login preserving intent. On sign-out it clears the cache, `sessionStorage` drafts and any cached evidence URL (CS-SEC-07). A stale queue must never be visible after sign-out. |
-| **CS-AU-10** | **v1 has no self-service registration, no email password reset, no social sign-in and no "forgot password" flow.** Users are created by a `site_admin` (TRD §10.6). These affordances are absent from the build, not hidden — anything else is an account-enumeration surface the API does not back. |
+| **CS-AU-10** | *(Amended in 1.4 — the 1.3 rule prohibited these flows outright.)* Self-service **sign-up and password reset exist**; social sign-in does not. Both flows are **enumeration-safe by construction**: sign-up and reset-request return the same generic acceptance whether or not the account exists (`202`, one message), and no response, timing or wording ever distinguishes a known address from an unknown one. Sign-up is **deployment-gated** (`GL_SIGNUP_ENABLED`); a self-registered user holds **no role grants** until a `site_admin` assigns them (TRD §12.3) — signing up grants an identity, never access. |
 | **CS-AU-11** | Login is fully keyboard-operable, focuses the email field on mount, moves focus to the error on a failed submit (CS-FM-04), keeps visible focus rings (CS-Y-08) and remains usable at 200% zoom. It is the first screen every user meets; it is not exempt from §15. |
+| **CS-AU-12** | Every password field uses the `PasswordInput` primitive (§5.3): a show/hide toggle rendered as an **eye / eye-off icon** (inline SVG, no icon-font, no external asset) inside the field, `aria-pressed`, an accessible name ("Show password" / "Hide password"), reachable by keyboard without trapping focus, and never clearing or re-masking the value on toggle. Paste is never blocked (CS-AU-15). |
+| **CS-AU-13** | Auth forms validate per §10 (CS-FM-01: React Hook Form + schema resolver; CS-FM-02: on submit, then re-validate on change after first failure). Field errors render inline through `FormField` (CS-FM-03); the submit stays enabled while invalid (CS-FM-05). Client validation is a courtesy — the server re-validates everything, and a server field error maps onto its field (CS-FM-06). |
+| **CS-AU-14** | The identity panel's background treatment is **decorative and self-contained**: CSS or inline SVG shipped with the bundle — never a network-fetched image, never a photograph of a workplace or a person, never an evidence frame (CS-AU-02). It must keep the panel's text at ≥ 4.5:1 contrast, respect `prefers-reduced-motion` (no animation without it), and carry `aria-hidden="true"`. |
+| **CS-AU-15** | Password policy is NIST-style: **minimum 12 characters, maximum 128, no composition rules** (no "one uppercase, one symbol" theatre), paste allowed, value never logged. The requirement is stated *before* the first failed submit, not revealed by it. The same policy is enforced server-side; the client merely mirrors it. |
+| **CS-AU-16** | Sign-up (SCR-1a) collects full name, email, **site code** and password. On acceptance it renders the generic outcome — account requested; a site admin assigns access — and routes to login. It never states whether the email or the site code was already known (CS-AU-10), and it renders the same acceptance whether the deployment has sign-up enabled or not. |
+| **CS-AU-17** | Forgot password (SCR-1b) collects only an email and always renders the same acceptance: "If that address has an account, a reset link has been sent." Reset (SCR-1c) takes its token from the URL, never re-displays it, submits token + new password, and on an invalid or expired token renders one generic failure with a route back to SCR-1b — never a hint about why the token failed. |
+| **CS-AU-18** | Auth screens link only to each other: login ↔ sign up ↔ forgot password, reset → login. No auth screen links into the application (CS-AU-01), and no application screen links back to sign-up. |
 
 ### 23.4 Roles and navigation
 
@@ -1193,6 +1284,9 @@ A change is not done until every line is true. This is the review checklist; use
 
 | Version | Date | Change | Author |
 |---|---|---|---|
+| 1.6 | 12 Aug 2026 | §12.1 brand mark (shield-containing-lens, one inline-SVG component mirrored as the favicon, three placements only); new §12.2 voice rules CS-MSG-01…05: outcome–consequence message pattern with banned generic strings, one typed message catalogue, toast lifecycle/announcement/stacking rules, decision toasts naming the record consequence, enumeration-safe screens keep generic copy. | Kapil |
+| 1.5 | 12 Aug 2026 | **Design language (§12.1)** by owner direction: dark-first token system (surfaces, ink, cyan accent, status, validated categorical palette for charts/stat tiles in both themes), type/radius/elevation/motion/density scales; new CS-Y-09…13 (tokens-once via CSS variables, scale-only styling, palette re-validation duty, functional-motion limits, designed loading/empty/error states). | Kapil |
+| 1.4 | 12 Aug 2026 | **Amended CS-AU-10 by owner decision**: self-service sign-up (deployment-gated, no role grants on creation) and token-based password reset now exist; the 1.3 prohibition is preserved for social sign-in only. Auth screens become a family (SCR-1…SCR-1c) sharing one `AuthLayout`; added CS-AU-12…CS-AU-18: `PasswordInput` primitive with an accessible eye-icon toggle, §10-stack validation on auth forms, self-contained decorative background rules, NIST-style password policy (12–128, no composition rules), enumeration-safe sign-up/reset copy, and auth-screen linking rules. | Kapil |
 | 1.3 | 12 Aug 2026 | Added pagination (§9.5) — cursor-based per TRD §10.1, URL-held, opaque cursor, cursor reset on filter change, server-provided depth, explicit Next/Previous, one `Pagination` primitive. Added §23: the fixed screen inventory mapped to routes, features and roles; the application shell with always-visible queue depth; the two-panel login screen with generic `401` copy, rate-limit handling, validated redirect intent and no self-service account flows; role-shaped navigation with absent-not-disabled affordances; and the admin area rules for explicit rule activation, non-optimistic scope changes, write-only camera credentials, plain-language retention, no user-activity surfaces, read-only audit and honest health states. Extended the project structure and primitive roadmap; added screen-level tests and Definition-of-Done items. Renumbered §23–§26 to §24–§27. | — |
 | 1.2 | 8 Aug 2026 | Added routing and URL state (§8), forms and user input (§10), display formatting and time (§13), performance and payload (§16), environment and configuration (§19). Extended accessibility with landmarks, shortcut scoping, reduced motion and a manual keyboard gate; added absence-test and optimistic-failure-path testing rules; added the implied-dependency register (§21.4) and import-order, cycle, env and bundle-budget lint ownership. Narrowed the optimistic-update scope against BR-004 and extended §17 with BR-R-03 visibility. | — |
 | 1.1 | 8 Aug 2026 | Replaced arbitrary structural limits with review signals; clarified contract ownership, safe type exceptions and abstraction policy; corrected optimistic rollback and button loading examples; added frontend security/privacy, accurate lint ownership, production-build and supply-chain gates; aligned testing with TRD §19. | — |

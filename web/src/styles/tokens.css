@@ -1,0 +1,126 @@
+/**
+ * Guardian Lens design tokens — FRONTEND_CODING_STANDARDS §12.1, CS-Y-09.
+ *
+ * Every visual constant lives HERE and only here; the Tailwind theme reads
+ * these vars. A hex literal anywhere else in src/ is a defect (CS-Y-04).
+ *
+ * Dark is the default theme (:root); light is the `.light` class variant,
+ * applied to <html> before first paint by the inline snippet in index.html.
+ *
+ * Deviations from §12.1, with reasons (recorded per CS-Y-11 discipline):
+ *  - Primary CTA ink: §12.1 says white on brand-500, but white on #06B6D4 is
+ *    2.4:1 — a CS-A-08 failure. The fill ink is deep cyan #083344 (5.4:1 on
+ *    brand-500, higher on the brand-400 hover).
+ *  - Solid status fills for buttons (ok/danger "solid") are fixed steps of
+ *    the §12.1 status hues chosen for ≥4.5:1 white ink.
+ *  - Light-theme text-grade status inks: §12.1 ok #059669 is 3.77:1 on white
+ *    and danger #DC2626 is 4.14:1 on its subtle tint — CS-A-08 failures at
+ *    chip/status text sizes. Light ok is #047857 (4.7:1 on its tint) and
+ *    light danger #B91C1C (5.5:1 on its tint); warn keeps #B45309 with its
+ *    tint alpha at 0.08 (4.5:1). Fills and chart hues keep §12.1 values.
+ *  - Interactive brand ink on light: §12.1 says 600, but #0891B2 is 3.68:1
+ *    on white; light brand-ink maps to 700 (#0E7490, 5.4:1).
+ *  - radius 6 exists solely for the Kbd keycap (task-directed addition).
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ── Surfaces & ink (§12.1, dark) ─────────────────────────────────── */
+  --color-bg: #0b0f14;
+  --color-surface-1: #11161d;
+  --color-surface-2: #161d26;
+  --color-surface-3: #1d2530;
+  --color-border: #273240;
+  --color-border-strong: #35424f;
+  --color-fg: #e8edf2;
+  --color-fg-muted: #9aaaba;
+  --color-fg-faint: #64748b;
+
+  /* ── Accent (brand) — cyan, fixed across themes; never status ─────── */
+  --color-brand-300: #67e8f9;
+  --color-brand-400: #22d3ee;
+  --color-brand-500: #06b6d4;
+  --color-brand-600: #0891b2;
+  --color-brand-700: #0e7490;
+  /* Interactive text: 300 on dark (§12.1); the light override is below. */
+  --color-brand-ink: var(--color-brand-300);
+  --color-brand-subtle: rgb(34 211 238 / 0.12);
+  /* Ink on a brand-500 CTA fill — see deviation note above. */
+  --color-brand-fill-ink: #083344;
+  /* §12.1 brand mark: 400 on dark, 600 on light. */
+  --color-brand-mark: var(--color-brand-400);
+
+  /* ── Status (icon + text always — NFR-ACC-01) ─────────────────────── */
+  --color-ok: #34d399;
+  --color-ok-subtle: rgb(52 211 153 / 0.14);
+  --color-warn: #fbbf24;
+  --color-warn-subtle: rgb(251 191 36 / 0.14);
+  --color-danger: #f87171;
+  --color-danger-subtle: rgb(248 113 113 / 0.14);
+  /* Solid fills for destructive / affirmative CTAs, white ink ≥4.5:1. */
+  --color-ok-solid: #047857;
+  --color-ok-solid-hover: #065f46;
+  --color-danger-solid: #dc2626;
+  --color-danger-solid-hover: #b91c1c;
+
+  /* ── Categorical (charts & stat tiles) — fixed order emerald →
+     violet → amber → cyan → rose; never cycled, never status (CS-Y-11).
+     Validated: CVD ΔE, lightness band, ≥3:1 vs surface — both themes. ── */
+  --color-chart-1: #059669;
+  --color-chart-2: #8b5cf6;
+  --color-chart-3: #d97706;
+  --color-chart-4: #0891b2;
+  --color-chart-5: #f43f5e;
+
+  /* ── Overlay behind modals / drawers ──────────────────────────────── */
+  --color-overlay: rgb(3 7 12 / 0.65);
+
+  /* ── Elevation (§12.1) — dark: hairline border + ambient + glow ───── */
+  --shadow-ambient: 0 8px 24px -16px #000;
+  --shadow-glow: 0 0 24px -8px var(--color-brand-400);
+  --shadow-modal: 0 8px 24px -16px #000, 0 24px 64px -24px #000;
+}
+
+.light {
+  color-scheme: light;
+
+  /* ── Surfaces & ink (§12.1, light) ────────────────────────────────── */
+  --color-bg: #f7f9fb;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f1f4f7;
+  --color-surface-3: #e8edf2;
+  --color-border: #d9e0e7;
+  --color-border-strong: #c3cdd7;
+  --color-fg: #0c1420;
+  --color-fg-muted: #506070;
+  --color-fg-faint: #8494a4;
+
+  /* §12.1 says 600 here, but 600 on white is 3.68:1 — ink maps to 700
+     (5.4:1) so interactive text passes CS-A-08. */
+  --color-brand-ink: var(--color-brand-700);
+  --color-brand-mark: var(--color-brand-600);
+  --color-brand-subtle: rgb(8 145 178 / 0.1);
+
+  /* ── Status, light values ─────────────────────────────────────────── */
+  --color-ok: #047857;
+  --color-ok-subtle: rgb(5 150 105 / 0.12);
+  --color-warn: #b45309;
+  --color-warn-subtle: rgb(180 83 9 / 0.08);
+  --color-danger: #b91c1c;
+  --color-danger-subtle: rgb(220 38 38 / 0.1);
+
+  /* ── Categorical, light values (§12.1) ────────────────────────────── */
+  --color-chart-1: #059669;
+  --color-chart-2: #7c3aed;
+  --color-chart-3: #d97706;
+  --color-chart-4: #0891b2;
+  --color-chart-5: #e11d48;
+
+  --color-overlay: rgb(12 20 32 / 0.45);
+
+  /* ── Elevation — light: layered soft shadow ───────────────────────── */
+  --shadow-ambient: 0 1px 2px rgb(12 20 32 / 0.06), 0 8px 24px -12px rgb(12 20 32 / 0.12);
+  --shadow-glow: 0 1px 2px rgb(12 20 32 / 0.08), 0 4px 16px -4px rgb(8 145 178 / 0.35);
+  --shadow-modal: 0 4px 12px rgb(12 20 32 / 0.08), 0 24px 64px -24px rgb(12 20 32 / 0.28);
+}

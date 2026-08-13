@@ -6,6 +6,58 @@ Research cut-off 20 July 2026 · POC target 14 August 2026 · Team of five
 
 ---
 
+## Repository
+
+| Path | Contents | Normative source |
+|---|---|---|
+| [Docs/](Docs/) | The controlled document set — GOVERNANCE §19.1 | — |
+| [migrations/tenant/](migrations/tenant/) | Tenant schema, one database per tenant (ADR-016) | [Docs/DATABASE.md](Docs/DATABASE.md) §5, §6 |
+| [migrations/control/](migrations/control/) | Tenant registry and routing (ADR-017) | [Docs/DATABASE.md](Docs/DATABASE.md) §1.4 |
+| [src/guardian_lens/rules/](src/guardian_lens/rules/) | Rule-to-constraint registry | [Docs/RULE_BOOK.md](Docs/RULE_BOOK.md) §6 |
+| [src/guardian_lens/db/](src/guardian_lens/db/) | FF-11 attestation, tenant provisioning | [Docs/DATABASE.md](Docs/DATABASE.md) §13.5 |
+| [tests/bypass/](tests/bypass/) | Business-rule bypass suite | [Docs/TRD.md](Docs/TRD.md) §19.4 |
+
+**Where code and documents disagree, the documents prevail and the code is corrected.**
+
+This is TRD §20.2 steps 1–4 in development form: data layer, control plane
+API (`src/guardian_lens/`), review UI (`web/`) and the edge agent with a
+synthetic detector (`src/guardian_lens_edge/`). The real ONNX detector is
+gated on G1 and does not exist yet.
+
+```bash
+make run          # ONE command: db + API (:8000) + review UI (:5173)
+make edge-demo    # second terminal: simulated site feeds the queue
+```
+
+Login `admin@guardianlens.local` / `guardian-dev-1`. Full command list,
+workflow narrative and gap register: **[Docs/WORKFLOW.md](Docs/WORKFLOW.md)**.
+
+Individual pieces: `make api` · `make web` · `make bypass` · `make e2e` ·
+`make test` — see `make help`.
+
+> Every SQL statement in `Docs/DATABASE.md` remains a **specification**. The
+> migrations are the executable form, and they are reviewed against it — a
+> document gets reviewed, a migration gets applied.
+
+### Tests
+
+| Suite | Asserts | Needs a database |
+|---|---|---|
+| `tests/bypass/` | Every ABSOLUTE rule is unviolable **via direct SQL** — TRD §19.4 | yes |
+| `tests/integration/` | Audit atomicity, concurrent decisions, clean instance, query plans, CLI | yes |
+| `tests/migrations/` | Every revision reverses and reapplies; provisioning lifecycle | yes |
+| `tests/unit/` | URL handling, registry invariants | no |
+
+Markers separate the two rule states: `-m active_rule` is release-blocking,
+`-m proposed_rule` is informational until [RULE_BOOK.md](Docs/RULE_BOOK.md)
+§10 ratification.
+
+CI additionally enforces GOVERNANCE §8.2 — a pull request that changes rule
+enforcement **and** the bypass suite that tests it fails the build and must
+be split.
+
+---
+
 ## Documents
 
 | # | Document | Pages | Owner | Status |

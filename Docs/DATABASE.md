@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document | Database Design Specification |
-| Version | 1.1 |
+| Version | 1.3 |
 | Status | For engineering review |
 | Programme phase | Week 3 — Govern · 8 August 2026 |
 | Owner | Kapil (Engineering) — same owner as [TRD.md](TRD.md), per [GOVERNANCE.md](GOVERNANCE.md) §19.1 |
@@ -669,6 +669,44 @@ Aggregate counts that survive deletion of the underlying rows.
 > **Why this exists.** [RULE_BOOK.md](RULE_BOOK.md) §8.1 resolves the tension between BR-007 (rejections retained and visible) and BR-009 (delete on retention elapse) as: *"Aggregate rejection counts survive deletion of the underlying records; the counts contain no personal data."* There is currently no table in which those counts could survive. Once the rows are gone the counts are gone with them, and the agreed resolution is unimplementable. `AMD-DB-14`.
 
 **This table is bound by §4.1.** Its grain is site / zone / rule-type / date — never anything that resolves to an individual. Adding a person-resolving dimension here would violate BR-002 and BR-P-03 `[PROPOSED]` exactly as adding one to `events` would.
+
+
+## 5.13 `refresh_tokens` `[MVP]` — added by migration 0010
+
+Rotation with reuse detection for human sessions (TRD §12.2: *"refresh-token
+hashes only; never plaintext"* — a store is what makes rotation and reuse
+detection possible at all).
+
+| Column | Type | Null | Note |
+|---|---|---|---|
+| `id` | UUID | No | PK |
+| `user_id` | UUID | No | FK → `users`, RESTRICT |
+| `family_id` | UUID | No | Rotation family; reuse of a rotated token revokes the family |
+| `token_hash` | BYTEA | No | SHA-256, UNIQUE, length-32 CHECK. Never the token |
+| `issued_at` / `expires_at` | TIMESTAMPTZ | No | CHECK `expires_at > issued_at` |
+| `revoked_at` | TIMESTAMPTZ | Yes | |
+| `replaced_by` | UUID | Yes | Self-FK — the rotation chain |
+
+Purely additive; carries no business rule, so it has no entry in the
+enforcement registry. C4 by classification (§8.1): hashes only, never
+logged, never in any response.
+
+## 5.14 `password_reset_tokens` `[MVP]` — added by migration 0011
+
+Self-service password reset (FRONTEND_CODING_STANDARDS CS-AU-10 v1.4, owner
+decision). Single-use, 30-minute tokens; the store holds **only** a SHA-256.
+
+| Column | Type | Null | Note |
+|---|---|---|---|
+| `id` | UUID | No | PK |
+| `user_id` | UUID | No | FK → `users`, **CASCADE** — a reset token is meaningless without its user and holds nothing auditable |
+| `token_hash` | BYTEA | No | SHA-256, UNIQUE, length-32 CHECK. Never the token |
+| `created_at` / `expires_at` | TIMESTAMPTZ | No | CHECK `expires_at > created_at` |
+| `used_at` | TIMESTAMPTZ | Yes | Single-use; a new request stamps prior unused tokens |
+
+A successful reset revokes **every** refresh token for the user (§5.13) — a
+reset ends all sessions. Its three constraints are registered for FF-11
+attestation as coherence entries.
 
 ---
 
@@ -2160,6 +2198,8 @@ CREATE TABLE control_audit_log (
 | Version | Date | Change | Author | Reviewed by |
 |---|---|---|---|---|
 | 1.0 | 2026-08-08 | Initial database design. Four-store data architecture, negative schema, physical schema with constraint and trigger specifications, PII map, retention mechanics, edge SQLite store, evidence store, migration strategy, volumetric model, backup and recovery, database access control, data-layer bypass suite. ADR-014 and ADR-015. Sixteen proposed TRD amendments in Appendix A. | — | — |
+| 1.3 | 2026-08-12 | §5.14 `password_reset_tokens` (migration 0011; single-use SHA-256, reset revokes all sessions) with its constraints registered for FF-11. Self-service signup writes `user_directory` + a `system.user.signed_up` audit entry; signup is deployment-gated and grants no roles. | Kapil |
+| 1.2 | 2026-08-12 | §5.13 `refresh_tokens` (migration 0010, TRD §12.2 rotation + reuse detection). Deprovisioning now deletes the tenant's `user_directory` rows — the login directory must not outlive the tenant (defect found by the E2E workflow test; §13.5.2 sequence unchanged, directory cleanup added before the tombstone). | Kapil |
 | 1.1 | 2026-08-12 | **Isolated multi-tenancy per ADR-016.** New §1.3 tenancy topology, §1.4 control database (**ADR-017**) and `tenant_identity`, §1.5 authentication and tenant resolution; §2.1 why no `tenant_id` column exists; §13.5 migration fan-out, provisioning and deprovisioning; per-tenant backup, restore verification and integrity checks 8–9; §17.3 connection ceiling; bypass cases DB-21…DB-27; control schema in Appendix B.2; four RULE_BOOK amendments in Appendix A.2. TRD §2, §8–9, §13, §18 updated in place by the owner. | — | Kapil (owner) |
 
 # Sign-off

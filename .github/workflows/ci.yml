@@ -1,0 +1,101 @@
+# TRD 14.1 CI pipeline and 12.8 security testing.
+#
+# The business-rule bypass suite "runs on every CI execution and a failure is
+# never overridden" (TRD 19.4). That sentence is only true if something runs
+# it automatically, which is what this file is for.
+
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+env:
+  PGUSER: guardian
+  PGPASSWORD: guardian
+  GL_CONTROL_DB_URL: postgresql+psycopg://guardian:guardian@localhost:5432/gl_control
+  GL_TENANT_DB_URL: postgresql+psycopg://guardian:guardian@localhost:5432/gl_tenant_ci
+
+jobs:
+  # GOVERNANCE 8.2: "The bypass suite is never modified in the same change as
+  # the code it tests. A pull request touching both is automatically T3 and
+  # must be split. This is the single cheapest control in this document and
+  # the easiest one to lose."
+  #
+  # It is easy to lose because it is a sentence in a document that nobody
+  # reads at 6pm on a Friday. Here it is a job that fails the build.
+  change-control:
+    name: T3 split check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Refuse a PR that edits enforcement and its own test together
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          echo "$CHANGED"
+
+          ENFORCEMENT=$(echo "$CHANGED" | grep -E '^(migrations/|src/guardian_lens/rules/)' || true)
+          SUITE=$(echo "$CHANGED" | grep -E '^tests/bypass/' || true)
+
+          if [ -n "$ENFORCEMENT" ] && [ -n "$SUITE" ]; then
+            echo "::error::T3 violation (GOVERNANCE 8.2): this pull request changes"
+            echo "::error::rule enforcement AND the suite that tests it. Split it."
+            echo "--- enforcement ---"; echo "$ENFORCEMENT"
+            echo "--- bypass suite ---"; echo "$SUITE"
+            exit 1
+          fi
+          echo "ok: enforcement and its test suite are not changed together"
+
+  test:
+    name: Schema, rules and bypass suite
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: guardian
+          POSTGRES_PASSWORD: guardian
+          POSTGRES_DB: gl_control
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U guardian"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]" pytest-cov
+
+      # TRD 12.8 — every CI run.
+      - name: Static analysis (bandit)
+        run: bandit -q -r src/
+
+      - name: Control schema
+        run: alembic -n control upgrade head
+
+      # TRD 20.2 step 1: "Constraints reject invalid data before any code
+      # exists." The suite provisions its own tenant through the real
+      # provisioning path, so a hand-built test database cannot mask drift.
+      - name: Business-rule bypass suite
+        run: pytest tests/bypass -v
+
+      - name: Unit, integration and migration suites
+        run: pytest tests/unit tests/integration tests/migrations -v
+
+      - name: Coverage
+        run: pytest --cov=guardian_lens --cov-report=term-missing -q
+
+      # A green suite against a schema missing a constraint is a green suite
+      # that proves nothing. FF-11 checks the schema itself.
+      - name: FF-11 attestation
+        run: |
+          python -m guardian_lens.db.provisioning provision ciattest "CI attestation"
+          python -m guardian_lens.db.attestation \
+            postgresql+psycopg://guardian:guardian@localhost:5432/gl_tenant_ciattest

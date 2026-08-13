@@ -1,0 +1,52 @@
+import { useQuery } from '@tanstack/react-query';
+
+import { apiClient } from '@/lib/api/client';
+import { unwrapItems } from '@/lib/api/list';
+
+import { configKeys } from './configKeys';
+
+import type {
+  CameraSummary,
+  ListResponse,
+  RuleSummary,
+  Site,
+  ZoneSummary,
+} from '@/lib/api/types';
+
+/** TRD §10.6 — GET /sites is site_admin scoped, so callers gate `enabled`. */
+export const useSitesQuery = (enabled: boolean) =>
+  useQuery({
+    queryKey: configKeys.sites(),
+    queryFn: async ({ signal }) =>
+      unwrapItems(await apiClient.get<ListResponse<Site> | Site[]>('/api/v1/sites', { signal })),
+    enabled,
+  });
+
+export const useCamerasQuery = () =>
+  useQuery({
+    queryKey: configKeys.cameras(),
+    queryFn: async ({ signal }) =>
+      unwrapItems(
+        await apiClient.get<ListResponse<CameraSummary> | CameraSummary[]>('/api/v1/cameras', {
+          signal,
+        }),
+      ),
+  });
+
+export const useZonesQuery = () =>
+  useQuery({
+    queryKey: configKeys.zones(),
+    queryFn: async ({ signal }) =>
+      unwrapItems(
+        await apiClient.get<ListResponse<ZoneSummary> | ZoneSummary[]>('/api/v1/zones', { signal }),
+      ),
+  });
+
+export const useRulesQuery = () =>
+  useQuery({
+    queryKey: configKeys.rules(),
+    queryFn: async ({ signal }) =>
+      unwrapItems(
+        await apiClient.get<ListResponse<RuleSummary> | RuleSummary[]>('/api/v1/rules', { signal }),
+      ),
+  });

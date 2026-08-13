@@ -1,0 +1,12 @@
+<!-- Guardian Lens favicon — §12.1 "Brand mark". Geometry mirrors
+     src/components/ui/Logo.tsx byte-for-byte (asserted by Logo.test.tsx);
+     dark tile (#0B0F14) behind the brand-400 mark so the tab reads on both
+     light and dark browser chrome. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <rect width="24" height="24" rx="5" fill="#0B0F14"/>
+  <g transform="translate(2.4 2.4) scale(0.8)" fill="none" stroke="#22D3EE">
+    <path d="M12 2.5 4 5.5v6c0 4.6 3.2 8 8 10 4.8-2 8-5.4 8-10v-6l-8-3Z" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="12" cy="10" r="3.5" stroke-width="2"/>
+    <circle cx="12" cy="10" r="1.25" fill="#22D3EE" stroke="none"/>
+  </g>
+</svg>

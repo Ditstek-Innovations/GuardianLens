@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Guardian Lens</title>
+    <script>
+      // Theme boot — runs before first paint so the stored preference applies
+      // with no flash (CS-Y-09: dark is the default; light is the `light`
+      // class). The storage key mirrors THEME_STORAGE_KEY in
+      // src/constants/storage.ts — keep the two in sync.
+      (function () {
+        try {
+          if (localStorage.getItem('gl.theme') === 'light') {
+            document.documentElement.classList.add('light');
+          }
+        } catch (error) {
+          /* storage unavailable — stay on the dark default */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -121,6 +121,13 @@ detection: a real model reaches a site only through gate **G1**
 ([GOVERNANCE.md](GOVERNANCE.md) §9), and until then RTSP mode runs a
 `NullDetector` (frames counted, nothing detected).
 
+First camera, or explaining the why to someone new? Read
+[CAMERA_ONBOARDING.md](CAMERA_ONBOARDING.md) — the orientation walkthrough
+from unboxing to the first verified record. Performing the integration?
+[CAMERA_INTEGRATION.md](CAMERA_INTEGRATION.md) is the technical runbook —
+phases, preconditions, API-level sequence, acceptance checks. This section
+stays the authoritative command reference.
+
 | Step | Command / action |
 |---|---|
 | 1 | `make run` — on first run it generates `GL_CAMERA_KEY` into `.env`. The same key must be present wherever the edge agent runs: the control plane **seals** camera credentials with it and cannot read them back; the edge **unseals** them in memory only |
@@ -228,3 +235,5 @@ Per BR-M-01 `[PROPOSED]` and AP-2, and because the detector is synthetic: **noth
 | 1.2 | 2026-08-13 | §7 gap 1 closed: agent-principal + model-version APIs (TRD §10.6 v1.2, DATABASE.md §10.3 v1.4) with API tests. §4 updated: Reports carries the verified-only analysis view (single-hue bar by dimension, decision-mix bar, chart tokens per FRONTEND_CODING_STANDARDS §12.1); Configuration gains the edge-agents section; CS-AD-03 confirmations on camera/agent registration and sign-out. | Kuldeep |
 | 1.3 | 2026-08-13 | Real-camera readiness: zone and rule **creation** exist in the UI (zone = full-frame at MVP with a CS-AD-03 confirm; rules created inactive per BR-001, activation unchanged), so §3a is now executable end-to-end from the browser — its steps renumbered 1–7 with the agent-registration step added. Whole flow verified in-browser: camera → agent (one-time credential) → zone → inactive rule → attributed activation. §5 web test count 72. | Kuldeep |
 | 1.4 | 2026-08-13 | **§3b Going real**: `make onboard` (provision + FF-11 attest + first-admin bootstrap) gives a real site a physically isolated tenant carrying no demo data; edge-demo now prints a DEMO-DATA warning. UI completes site administration: site creation, camera location, **credential replace** (CS-AD-06's replace action) and camera disable/enable — all confirmed submits. §5 web test count 79. | Kuldeep |
+| 1.5 | 2026-08-13 | §3a points at the new [CAMERA_ONBOARDING.md](CAMERA_ONBOARDING.md) — the non-normative unbox-to-verified-record orientation (why a camera, the stream's journey, parameters, steps, G1 caveat); commands remain authoritative here. | Kuldeep |
+| 1.6 | 2026-08-13 | §3a also points at [CAMERA_INTEGRATION.md](CAMERA_INTEGRATION.md) — the technical integration runbook: two phases with start conditions, dependency-ordered preconditions, API-level sequence with server-side effects, edge runtime behaviour, five acceptance checks, and the G1 detection path. | Kuldeep |

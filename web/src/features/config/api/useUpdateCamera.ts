@@ -15,6 +15,8 @@ export interface UpdateCameraInput {
   readonly streamUrl?: string;
   /** Administrative state only — 'disabled' stops the edge watching it. */
   readonly status?: 'active' | 'disabled';
+  readonly streamProfile?: 'primary' | 'secondary';
+  readonly sampleRateFps?: number;
 }
 
 export const useUpdateCamera = () => {
@@ -24,6 +26,8 @@ export const useUpdateCamera = () => {
       apiClient.patch<CameraSummary>(`/api/v1/cameras/${input.cameraId}`, {
         ...(input.streamUrl !== undefined ? { stream_url: input.streamUrl } : {}),
         ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.streamProfile !== undefined ? { stream_profile: input.streamProfile } : {}),
+        ...(input.sampleRateFps !== undefined ? { sample_rate_fps: input.sampleRateFps } : {}),
       }),
     onSettled: () => {
       // CS-D-05 — invalidate precisely.

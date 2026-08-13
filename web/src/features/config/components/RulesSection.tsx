@@ -36,6 +36,7 @@ export const RulesSection = () => {
   const [ruleType, setRuleType] = useState<string>(RULE_TYPE_OPTIONS[0].value);
   const [threshold, setThreshold] = useState('0.5');
   const [debounce, setDebounce] = useState('30');
+  const [dwell, setDwell] = useState('');
   const [writtenRef, setWrittenRef] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -59,6 +60,12 @@ export const RulesSection = () => {
       setFormError('Debounce must be a whole number of seconds, 0 or more.');
       return;
     }
+    const trimmedDwell = dwell.trim();
+    const parsedDwell = trimmedDwell === '' ? null : Number(trimmedDwell);
+    if (parsedDwell !== null && (!Number.isInteger(parsedDwell) || parsedDwell < 0)) {
+      setFormError('Dwell must be empty, or a whole number of seconds, 0 or more.');
+      return;
+    }
     setFormError(null);
     // No confirmation dialog here on purpose: creation is inert (BR-001,
     // created inactive always); activation below is the confirmed act.
@@ -68,6 +75,7 @@ export const RulesSection = () => {
         ruleType,
         confidenceThreshold: parsedThreshold,
         debounceSeconds: parsedDebounce,
+        dwellSeconds: parsedDwell,
         humanReadable: trimmedName,
         writtenRuleReference: writtenRef.trim() === '' ? null : writtenRef.trim(),
       },
@@ -75,6 +83,7 @@ export const RulesSection = () => {
         onSuccess: () => {
           setRuleName('');
           setWrittenRef('');
+          setDwell('');
           showToast({ tone: 'success', message: MESSAGES.config.ruleCreated });
         },
         onError: () => {
@@ -182,9 +191,23 @@ export const RulesSection = () => {
         />
       </FormField>
       <FormField
+        label="Dwell (seconds)"
+        hint="How long the condition must persist before firing. Empty fires on the first frame."
+        className="lg:col-span-2"
+      >
+        <Input
+          type="number"
+          min={0}
+          step={1}
+          inputMode="numeric"
+          value={dwell}
+          onChange={(event) => setDwell(event.target.value)}
+        />
+      </FormField>
+      <FormField
         label="Written rule reference"
         hint="The site safety rule this enforces (BR-011 — advisory, but expected)."
-        className="lg:col-span-7"
+        className="lg:col-span-5"
       >
         <Input value={writtenRef} onChange={(event) => setWrittenRef(event.target.value)} />
       </FormField>
@@ -211,6 +234,7 @@ export const RulesSection = () => {
               <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-fg-muted">
                 <th scope="col" className="h-10 px-4">Rule</th>
                 <th scope="col" className="h-10 px-4">Type</th>
+                <th scope="col" className="h-10 px-4">Timing</th>
                 <th scope="col" className="h-10 px-4">State</th>
                 <th scope="col" className="h-10 px-4">Activated by</th>
                 <th scope="col" className="h-10 px-4">Written rule reference</th>
@@ -224,6 +248,10 @@ export const RulesSection = () => {
                 <tr key={rule.id} className="h-10 transition-colors duration-120 hover:bg-surface-2">
                   <td className="px-4 py-2 text-fg">{rule.human_readable}</td>
                   <td className="px-4 py-2 text-fg-muted">{rule.rule_type}</td>
+                  <td className="px-4 py-2 text-fg-muted">
+                    {rule.debounce_seconds}s debounce
+                    {rule.dwell_seconds != null ? `, ${rule.dwell_seconds}s dwell` : ''}
+                  </td>
                   <td className="px-4 py-2">
                     {rule.is_active ? (
                       <Chip variant="ok" icon={<ChipIcon glyph="check" />}>

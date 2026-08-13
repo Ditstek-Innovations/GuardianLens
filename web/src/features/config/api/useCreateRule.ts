@@ -11,6 +11,8 @@ export interface CreateRuleInput {
   readonly ruleType: string;
   readonly confidenceThreshold: number;
   readonly debounceSeconds: number;
+  /** Seconds a condition must persist before the rule fires; null fires on the first frame. */
+  readonly dwellSeconds: number | null;
   readonly humanReadable: string;
   readonly writtenRuleReference: string | null;
 }
@@ -29,6 +31,7 @@ export const useCreateRule = () => {
         rule_type: input.ruleType,
         confidence_threshold: input.confidenceThreshold,
         debounce_seconds: input.debounceSeconds,
+        dwell_seconds: input.dwellSeconds,
         human_readable: input.humanReadable,
         written_rule_reference: input.writtenRuleReference,
       }),

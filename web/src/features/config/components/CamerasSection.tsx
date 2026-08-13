@@ -40,6 +40,8 @@ interface PendingCamera {
   readonly name: string;
   readonly streamUrl: string;
   readonly locationDescription: string | null;
+  readonly streamProfile: 'primary' | 'secondary';
+  readonly sampleRateFps: number;
 }
 
 /**
@@ -193,6 +195,8 @@ export const CamerasSection = () => {
   const [siteId, setSiteId] = useState('');
   const [streamUrl, setStreamUrl] = useState('');
   const [location, setLocation] = useState('');
+  const [streamProfile, setStreamProfile] = useState<'primary' | 'secondary'>('secondary');
+  const [sampleRateFps, setSampleRateFps] = useState('2');
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingCamera | null>(null);
   const [replaceTarget, setReplaceTarget] = useState<CameraSummary | null>(null);
@@ -205,8 +209,13 @@ export const CamerasSection = () => {
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const site = sites.find((candidate) => candidate.id === effectiveSiteId);
+    const parsedFps = Number(sampleRateFps);
     if (name.trim() === '' || streamUrl.trim() === '' || site === undefined) {
       setFormError('Name, site and stream URL are required.');
+      return;
+    }
+    if (Number.isNaN(parsedFps) || parsedFps <= 0 || parsedFps > 30) {
+      setFormError('Sample rate must be a number greater than 0 and at most 30 fps.');
       return;
     }
     setFormError(null);
@@ -216,6 +225,8 @@ export const CamerasSection = () => {
       name: name.trim(),
       streamUrl: streamUrl.trim(),
       locationDescription: location.trim() === '' ? null : location.trim(),
+      streamProfile,
+      sampleRateFps: parsedFps,
     });
   };
 
@@ -227,6 +238,8 @@ export const CamerasSection = () => {
         name: pending.name,
         streamUrl: pending.streamUrl,
         locationDescription: pending.locationDescription,
+        streamProfile: pending.streamProfile,
+        sampleRateFps: pending.sampleRateFps,
       },
       {
         onSuccess: () => {
@@ -234,6 +247,8 @@ export const CamerasSection = () => {
           setName('');
           setStreamUrl('');
           setLocation('');
+          setStreamProfile('secondary');
+          setSampleRateFps('2');
           // The stream URL is write-only — the API never returns it
           // (TRD §12.4/§12.5). The outcome toast states exactly that
           // (CS-MSG-01, CS-AD-06).
@@ -324,11 +339,41 @@ export const CamerasSection = () => {
       <FormField
         label="Location"
         hint="Where the camera physically is, e.g. “North wall, dock 3”."
-        className="lg:col-span-9"
+        className="lg:col-span-6"
       >
         <Input value={location} onChange={(event) => setLocation(event.target.value)} />
       </FormField>
-      <div className="flex items-end justify-end lg:col-span-3">
+      <FormField
+        label="Stream profile"
+        required
+        hint="Secondary (SD) is far cheaper to decode; safety rules rarely need HD."
+        className="lg:col-span-3"
+      >
+        <Select
+          value={streamProfile}
+          onChange={(event) => setStreamProfile(event.target.value as 'primary' | 'secondary')}
+        >
+          <option value="secondary">Secondary (SD)</option>
+          <option value="primary">Primary (HD)</option>
+        </Select>
+      </FormField>
+      <FormField
+        label="Sample rate (fps)"
+        required
+        hint="Frames sampled per second, up to 30. Safety rules rarely need more than 2."
+        className="lg:col-span-3"
+      >
+        <Input
+          type="number"
+          min={0.1}
+          max={30}
+          step={0.5}
+          inputMode="decimal"
+          value={sampleRateFps}
+          onChange={(event) => setSampleRateFps(event.target.value)}
+        />
+      </FormField>
+      <div className="flex items-end justify-end lg:col-span-12">
         <Button type="submit" isLoading={createCamera.isPending}>
           Register camera
         </Button>
@@ -351,6 +396,8 @@ export const CamerasSection = () => {
             <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-fg-muted">
               <th scope="col" className="h-10 px-4">Name</th>
               <th scope="col" className="h-10 px-4">Location</th>
+              <th scope="col" className="h-10 px-4">Profile</th>
+              <th scope="col" className="h-10 px-4">Sample rate</th>
               <th scope="col" className="h-10 px-4">Stream</th>
               <th scope="col" className="h-10 px-4">Credential</th>
               <th scope="col" className="h-10 px-4">
@@ -365,6 +412,10 @@ export const CamerasSection = () => {
                 <tr key={camera.id} className="h-10 transition-colors duration-120 hover:bg-surface-2">
                   <td className="px-4 py-2 text-fg">{camera.name}</td>
                   <td className="px-4 py-2 text-fg-muted">{camera.location_description ?? '—'}</td>
+                  <td className="px-4 py-2 text-fg-muted">
+                    {camera.stream_profile === 'primary' ? 'Primary (HD)' : 'Secondary (SD)'}
+                  </td>
+                  <td className="px-4 py-2 tabular-nums text-fg-muted">{camera.sample_rate_fps} fps</td>
                   <td className="px-4 py-2">
                     <Chip variant={presentation.variant} icon={<ChipIcon glyph={presentation.glyph} />}>
                       {presentation.label}

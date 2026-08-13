@@ -136,6 +136,9 @@ export interface CameraSummary {
   site_id: string;
   name: string;
   location_description?: string | null;
+  /** Which vendor stream the edge samples — 'primary' (HD) or 'secondary' (SD, lighter to decode). */
+  stream_profile: string;
+  sample_rate_fps: number;
   /** TRD §9.2 — active | degraded | disconnected | disabled; typed open for boundary honesty. */
   status: string;
   // NOTE deliberately absent: stream_url. The API never returns it (TRD §12.4/§12.5).
@@ -171,6 +174,9 @@ export interface RuleSummary {
   rule_type: string;
   is_active: boolean;
   confidence_threshold: number;
+  debounce_seconds: number;
+  /** Seconds a condition must persist before the rule fires; null = fires immediately. */
+  dwell_seconds: number | null;
   written_rule_reference: string | null;
   human_readable: string;
   /** ASSUMPTION A-8 — who activated the rule (BR-C-02); TRD §9.4 defines created_by only. */

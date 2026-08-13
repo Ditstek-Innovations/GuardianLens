@@ -28,10 +28,12 @@ import { downloadBlob } from '@/lib/utils/downloadBlob';
 
 import { useExportReport } from '../api/useExportReport';
 import { useReportSummary } from '../api/useReportSummary';
-import { GROUP_BY_OPTIONS } from '../types';
+import { GROUP_BY_OPTIONS, GROUP_LABEL, groupName } from '../types';
+import { DecisionMixBar } from './DecisionMixBar';
+import { VerifiedBarChart } from './VerifiedBarChart';
 
 import type { ChangeEvent, ReactNode } from 'react';
-import type { ReportGroup, ReportSummary } from '@/lib/api/types';
+import type { ReportSummary } from '@/lib/api/types';
 import type { GroupBy, ReportParams } from '../types';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -82,16 +84,6 @@ const StatPanel = ({
   </div>
 );
 
-const GROUP_LABEL: Record<GroupBy, string> = {
-  zone: 'Zone',
-  rule: 'Rule',
-  day: 'Day',
-  shift: 'Shift',
-};
-
-const groupName = (group: ReportGroup): string =>
-  group.zone ?? group.rule ?? group.day ?? group.shift ?? '—';
-
 const SummaryView = ({ summary, groupBy }: { summary: ReportSummary; groupBy: GroupBy }) => {
   const totalVerified = summary.groups.reduce((sum, group) => sum + group.verified_count, 0);
   const basisLabel =
@@ -125,28 +117,57 @@ const SummaryView = ({ summary, groupBy }: { summary: ReportSummary; groupBy: Gr
         />
       </div>
 
+      {summary.decision_counts !== undefined ? (
+        <section
+          aria-label="Decision mix"
+          className="rounded-card border border-border bg-surface-1 p-4 shadow-ambient"
+        >
+          <h3 className="text-sm font-semibold text-fg">Decision mix</h3>
+          <p className="mt-0.5 text-xs text-fg-muted">
+            Every decision of the period — accepted, corrected and rejected are all visible
+            (BR-R-03).
+          </p>
+          <div className="mt-3">
+            <DecisionMixBar counts={summary.decision_counts} />
+          </div>
+        </section>
+      ) : null}
+
       {summary.groups.length === 0 ? (
         <EmptyState
           title="No verified records in this period"
           detail="Read this together with the coverage gaps above: zero events may mean zero exceptions or zero watching."
         />
       ) : (
-        <Table>
-          <TableHead>
-            <TableHeadCell>{GROUP_LABEL[groupBy]}</TableHeadCell>
-            <TableHeadCell>Verified records</TableHeadCell>
-          </TableHead>
-          <TableBody>
-            {summary.groups.map((group) => (
-              <TableRow
-                key={`${group.zone ?? ''}|${group.rule ?? ''}|${group.day ?? ''}|${group.shift ?? ''}`}
-              >
-                <TableCell>{groupName(group)}</TableCell>
-                <TableCell className="tabular-nums">{group.verified_count}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="grid gap-4 xl:grid-cols-5">
+          <section
+            aria-label={`Verified records by ${GROUP_LABEL[groupBy].toLowerCase()}`}
+            className="rounded-card border border-border bg-surface-1 p-4 shadow-ambient xl:col-span-3"
+          >
+            <h3 className="text-sm font-semibold text-fg">
+              Verified records by {GROUP_LABEL[groupBy].toLowerCase()}
+            </h3>
+            <div className="mt-3">
+              <VerifiedBarChart groups={summary.groups} groupBy={groupBy} />
+            </div>
+          </section>
+          <Table className="xl:col-span-2 self-start">
+            <TableHead>
+              <TableHeadCell>{GROUP_LABEL[groupBy]}</TableHeadCell>
+              <TableHeadCell className="text-right">Verified records</TableHeadCell>
+            </TableHead>
+            <TableBody>
+              {summary.groups.map((group) => (
+                <TableRow
+                  key={`${group.zone ?? ''}|${group.rule ?? ''}|${group.day ?? ''}|${group.shift ?? ''}`}
+                >
+                  <TableCell>{groupName(group)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{group.verified_count}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
     </div>
   );
@@ -239,15 +260,21 @@ export const ReportsPage = () => {
 
   return (
     <section aria-label="Reports" className="space-y-4">
-      <PageHeading>Reports</PageHeading>
-      <div className="flex flex-wrap items-end gap-4">
-        <FormField label="From">
-          <Input type="date" value={from} onChange={handleFromChange} className="w-44" />
+      <div>
+        <PageHeading>Reports</PageHeading>
+        <p className="mt-1 text-sm text-fg-muted">
+          Verified records only — nothing unreviewed is counted here (BR-004).
+        </p>
+      </div>
+      {/* Filters in one row above the analysis, URL-backed (CS-RT-03). */}
+      <div className="flex flex-wrap items-end gap-3 rounded-card border border-border bg-surface-1 p-4 shadow-ambient">
+        <FormField label="From" className="w-40">
+          <Input type="date" value={from} onChange={handleFromChange} />
         </FormField>
-        <FormField label="To">
-          <Input type="date" value={to} onChange={handleToChange} className="w-44" />
+        <FormField label="To" className="w-40">
+          <Input type="date" value={to} onChange={handleToChange} />
         </FormField>
-        <FormField label="Group by">
+        <FormField label="Group by" className="w-36">
           <Select value={groupBy} onChange={handleGroupByChange}>
             {GROUP_BY_OPTIONS.map((option) => (
               <option key={option} value={option}>
@@ -257,7 +284,7 @@ export const ReportsPage = () => {
           </Select>
         </FormField>
         {isSiteAdmin ? (
-          <FormField label="Site">
+          <FormField label="Site" className="w-44">
             <Select value={siteId ?? ''} onChange={handleSiteChange}>
               {(sitesQuery.data ?? []).map((site) => (
                 <option key={site.id} value={site.id}>
@@ -267,9 +294,11 @@ export const ReportsPage = () => {
             </Select>
           </FormField>
         ) : null}
-        <Button variant="secondary" onClick={handleExport} isLoading={exportReport.isPending}>
-          Export CSV
-        </Button>
+        <div className="ml-auto">
+          <Button variant="secondary" onClick={handleExport} isLoading={exportReport.isPending}>
+            Export CSV
+          </Button>
+        </div>
       </div>
       {content}
     </section>

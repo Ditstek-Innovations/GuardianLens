@@ -124,7 +124,7 @@ export const ToastProvider = ({ children }: ToastProviderProps) => {
       {/* CS-SH-07 — the single outcome region, below the sticky header. */}
       <div
         aria-label="Notifications"
-        className="pointer-events-none fixed right-4 top-20 z-50 flex w-80 max-w-full flex-col gap-2"
+        className="pointer-events-none fixed right-4 top-16 z-50 flex w-80 max-w-full flex-col gap-2"
       >
         {toasts.map((toast) => (
           <ToastCard key={toast.id} toast={toast} onDismiss={dismissToast} />

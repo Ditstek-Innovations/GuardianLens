@@ -31,9 +31,14 @@ from guardian_lens.core.errors import ScopeError
 from guardian_lens.core.principal import AgentPrincipal, HumanPrincipal
 from guardian_lens.repositories.audit import AuditRepository
 from guardian_lens.schemas.config import (
+    AgentCreate,
+    AgentRegisteredResponse,
+    AgentResponse,
     CameraCreate,
     CameraPatch,
     CameraResponse,
+    ModelVersionCreate,
+    ModelVersionResponse,
     RuleCreate,
     RulePatch,
     RuleResponse,
@@ -261,6 +266,92 @@ def activate_rule(
         principal, rule_id, _ip(request)
     )
     return RuleResponse.model_validate(row._mapping)
+
+
+# -- edge agent principals (WORKFLOW.md 7 gap 1) -----------------------------
+
+
+@router.get("/agents", response_model=list[AgentResponse])
+def list_agents(
+    request: Request,
+    principal: HumanPrincipal = Depends(require_site_admin),
+    context: TenantContext = Depends(get_tenant_context),
+) -> list[AgentResponse]:
+    return [
+        AgentResponse.model_validate(row._mapping)
+        for row in _service(request, context).list_agents(principal)
+    ]
+
+
+@router.post("/agents", response_model=AgentRegisteredResponse, status_code=201)
+def register_agent(
+    body: AgentCreate,
+    request: Request,
+    principal: HumanPrincipal = Depends(require_site_admin),
+    context: TenantContext = Depends(get_tenant_context),
+) -> AgentRegisteredResponse:
+    # The composite credential appears in THIS response and nowhere else —
+    # not in the audit state, not in a log line, not on any later read.
+    row, credential = _service(request, context).register_agent(
+        principal, site_id=body.site_id, name=body.name, ip_address=_ip(request)
+    )
+    return AgentRegisteredResponse.model_validate(
+        {**row._mapping, "credential": credential}
+    )
+
+
+# -- model versions (gate G1 evidence trail) ---------------------------------
+
+
+@router.get("/model-versions", response_model=list[ModelVersionResponse])
+def list_model_versions(
+    request: Request,
+    principal: HumanPrincipal = Depends(require_site_admin),
+    context: TenantContext = Depends(get_tenant_context),
+) -> list[ModelVersionResponse]:
+    return [
+        ModelVersionResponse.model_validate(row._mapping)
+        for row in _service(request, context).list_model_versions(principal)
+    ]
+
+
+@router.post("/model-versions", response_model=ModelVersionResponse, status_code=201)
+def register_model_version(
+    body: ModelVersionCreate,
+    request: Request,
+    principal: HumanPrincipal = Depends(require_site_admin),
+    context: TenantContext = Depends(get_tenant_context),
+) -> ModelVersionResponse:
+    row = _service(request, context).register_model_version(
+        principal,
+        version=body.version,
+        artefact_hash=body.artefact_hash,
+        classes=body.classes,
+        training_data_hash=body.training_data_hash,
+        model_card_ref=body.model_card_ref,
+        datasheet_ref=body.datasheet_ref,
+        notes=body.notes,
+        ip_address=_ip(request),
+    )
+    return ModelVersionResponse.model_validate(row._mapping)
+
+
+@router.post(
+    "/model-versions/{model_version_id}/approve",
+    response_model=ModelVersionResponse,
+)
+def approve_model_version(
+    model_version_id: UUID,
+    request: Request,
+    principal: HumanPrincipal = Depends(require_site_admin),
+    context: TenantContext = Depends(get_tenant_context),
+) -> ModelVersionResponse:
+    # Explicit approval, approver from the token — the BR-C-02 pattern
+    # applied to gate G1; the request carries no body at all.
+    row = _service(request, context).approve_model_version(
+        principal, model_version_id, _ip(request)
+    )
+    return ModelVersionResponse.model_validate(row._mapping)
 
 
 # -- agent config pull -------------------------------------------------------

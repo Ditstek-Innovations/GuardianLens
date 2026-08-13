@@ -169,6 +169,14 @@ class VersionConflictError(GuardianError):
     code = "GL-4091"
 
 
+class DuplicateResourceError(GuardianError):
+    """A uniquely-identified resource already exists (or is already in the
+    requested state) — GL-409x conflict range, TRD 10.8."""
+
+    http_status = 409
+    code = "GL-4092"
+
+
 class PayloadTooLargeError(GuardianError):
     http_status = 413
     code = "GL-4130"

@@ -65,6 +65,15 @@ AUDIT_FIELD_ALLOWLIST: dict[str, frozenset[str]] = {
     "user": frozenset({"email", "full_name", "is_active"}),
     "user_role": frozenset({"role", "site_id"}),
     "agent": frozenset({"site_id", "name", "status"}),
+    # Gate G1 evidence trail — DATABASE.md 10.3 `model.registered` row
+    # ("Version, hashes, approver"), realised by migration 0004.
+    "model_version": frozenset(
+        {
+            "version", "artefact_hash", "training_data_hash", "classes",
+            "model_card_ref", "datasheet_ref", "approved_by", "approved_at",
+            "notes",
+        }
+    ),
     "auth": frozenset({"attempts", "window_seconds"}),
 }
 

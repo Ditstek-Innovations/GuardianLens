@@ -3,6 +3,7 @@ import { ROLE } from '@/constants/roles';
 import { useAuth } from '@/hooks/useAuth';
 import { usePageTitle } from '@/hooks/usePageTitle';
 
+import { AgentsSection } from './AgentsSection';
 import { CamerasSection } from './CamerasSection';
 import { RulesSection } from './RulesSection';
 import { SitesSection } from './SitesSection';
@@ -19,10 +20,17 @@ export const ConfigPage = () => {
   const isSiteAdmin = principal !== null && principal.roles.includes(ROLE.SITE_ADMIN);
 
   return (
-    <div className="space-y-8">
-      <PageHeading>Configuration</PageHeading>
+    <div className="space-y-6">
+      <div>
+        <PageHeading>Configuration</PageHeading>
+        <p className="mt-1 text-sm text-fg-muted">
+          Sites, cameras, zones and detection rules for this tenant. Every change here is
+          explicit, audited, and takes effect from the next edge sync.
+        </p>
+      </div>
       {isSiteAdmin ? <SitesSection /> : null}
       {isSiteAdmin ? <CamerasSection /> : null}
+      {isSiteAdmin ? <AgentsSection /> : null}
       <ZonesSection />
       <RulesSection />
     </div>

@@ -5,4 +5,5 @@ export const configKeys = {
   cameras: () => [...configKeys.all, 'cameras'] as const,
   zones: () => [...configKeys.all, 'zones'] as const,
   rules: () => [...configKeys.all, 'rules'] as const,
+  agents: () => [...configKeys.all, 'agents'] as const,
 };

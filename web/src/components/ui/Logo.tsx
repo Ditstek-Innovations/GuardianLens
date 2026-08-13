@@ -4,8 +4,9 @@
  * centred in the shield's upper two-thirds (2px stroke), a filled pupil dot;
  * nothing else, legible at 16px. Colour rides the brand-mark token (400 on
  * dark, 600 on light). It appears in exactly three places — favicon, shell
- * header, auth identity panel — always via this component; public/favicon.svg
- * mirrors the same geometry byte-for-byte (asserted by Logo.test.tsx).
+ * chrome (the sidebar rail, or the top bar where the rail is hidden), auth
+ * identity panel — always via this component; public/favicon.svg mirrors the
+ * same geometry byte-for-byte (asserted by Logo.test.tsx).
  */
 
 /** Exported so the favicon-mirror test can assert byte-for-byte geometry. */

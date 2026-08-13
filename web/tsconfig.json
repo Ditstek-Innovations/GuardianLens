@@ -20,7 +20,7 @@
     "noUnusedParameters": true,
     "allowUnreachableCode": false,
     "verbatimModuleSyntax": true,
-    "types": ["vite/client"],
+    "types": ["vite/client", "node"],
     "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] }
   },

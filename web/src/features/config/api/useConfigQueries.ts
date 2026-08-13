@@ -22,7 +22,8 @@ export const useSitesQuery = (enabled: boolean) =>
     enabled,
   });
 
-export const useCamerasQuery = () =>
+/** TRD §10.6 — GET /cameras is site_admin scoped too; non-admin callers gate `enabled`. */
+export const useCamerasQuery = (enabled: boolean = true) =>
   useQuery({
     queryKey: configKeys.cameras(),
     queryFn: async ({ signal }) =>
@@ -31,6 +32,7 @@ export const useCamerasQuery = () =>
           signal,
         }),
       ),
+    enabled,
   });
 
 export const useZonesQuery = () =>

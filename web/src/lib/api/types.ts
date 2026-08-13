@@ -147,6 +147,24 @@ export interface ZoneSummary {
   name: string;
 }
 
+export interface AgentSummary {
+  id: string;
+  site_id: string;
+  name: string;
+  /** TRD §9 — active | degraded | offline; typed open for boundary honesty. */
+  status: string;
+  last_seen_at?: string | null;
+  last_health_at?: string | null;
+  agent_version?: string | null;
+  applied_config_version?: number | null;
+  // NOTE deliberately absent: credential_hash. The API never returns it.
+}
+
+/** POST /agents only — the composite credential appears exactly once, here. */
+export interface AgentRegistered extends AgentSummary {
+  credential: string;
+}
+
 export interface RuleSummary {
   id: string;
   zone_id: string;

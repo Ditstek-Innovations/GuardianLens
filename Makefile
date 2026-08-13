@@ -1,4 +1,4 @@
-.PHONY: help run edge-demo api web e2e up down migrate-control provision attest bypass unit test coverage lint clean
+.PHONY: help run edge-demo api web e2e up down migrate-control provision onboard attest bypass unit test coverage lint clean
 
 # .env is the single source of truth for local runs. `-include` tolerates
 # its absence; `export` passes everything to child processes so make targets
@@ -17,6 +17,9 @@ help:
 	@echo "  make up               start PostgreSQL 16 (docker-compose.dev.yml)"
 	@echo "  make migrate-control  create the control schema"
 	@echo "  make provision        provision a tenant database (TENANT=slug)"
+	@echo "  make onboard          REAL site, clean tenant: provision + attest +"
+	@echo "                        first admin (TENANT= ADMIN_EMAIL= ADMIN_NAME="
+	@echo "                        SITE_NAME= TZ=) — no demo data, WORKFLOW.md 3b"
 	@echo "  make attest           FF-11 constraint attestation for a tenant"
 	@echo "  make bypass           run the business-rule bypass suite (TRD 19.4)"
 	@echo "  make unit             unit tests, no database"
@@ -65,6 +68,17 @@ migrate-control:
 # create -> migrate to head -> seed -> attest -> activate.
 provision:
 	.venv/bin/python -m guardian_lens.db.provisioning provision $(TENANT)
+
+# Going real (WORKFLOW.md 3b): a physically isolated tenant carrying no demo
+# data, FF-11 attested, with its first admin bootstrapped. GL_BOOTSTRAP_PASSWORD
+# must be exported for the admin's first sign-in; edge-demo must never be
+# pointed at this tenant.
+onboard:
+	@test -n "$(TENANT)" -a -n "$(ADMIN_EMAIL)" -a -n "$(ADMIN_NAME)" \
+	  -a -n "$(SITE_NAME)" -a -n "$(TZ)" || \
+	  (echo "usage: make onboard TENANT=slug ADMIN_EMAIL=a@b ADMIN_NAME='Full Name' SITE_NAME='Plant name' TZ=Area/City"; exit 1)
+	.venv/bin/python -m guardian_lens.db.provisioning provision $(TENANT)
+	.venv/bin/python -m guardian_lens.api.bootstrap $(TENANT) $(ADMIN_EMAIL) "$(ADMIN_NAME)" --site-name "$(SITE_NAME)" --timezone $(TZ)
 
 attest:
 	.venv/bin/python -m guardian_lens.db.attestation $(TENANT)

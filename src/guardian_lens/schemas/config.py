@@ -135,3 +135,64 @@ class RuleResponse(BaseModel):
     deactivated_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class AgentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    site_id: UUID
+    name: str = Field(min_length=1, max_length=200)
+
+
+class AgentResponse(BaseModel):
+    """No credential material, ever — credential_hash has no response field
+    through which it could travel (mirrors the camera credential rule)."""
+
+    id: UUID
+    site_id: UUID
+    name: str
+    status: str
+    last_seen_at: datetime | None
+    last_health_at: datetime | None
+    agent_version: str | None
+    applied_config_version: int | None
+    clock_skew_ms: int | None
+
+
+class AgentRegisteredResponse(AgentResponse):
+    """Registration only. The composite credential (slug:agent_id:secret,
+    the /auth/agent exchange format) is returned exactly ONCE, here; the
+    server stores an Argon2 hash and cannot reproduce it."""
+
+    credential: str
+
+
+class ModelVersionCreate(BaseModel):
+    """Gate G1 evidence trail (GOVERNANCE.md 9): registration records the
+    artefact identity and the card/datasheet references. There is no
+    deployed_at field — deployment requires a recorded approval first
+    (chk_model_deployed_requires_approval, migration 0004)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: str = Field(min_length=1, max_length=40)
+    artefact_hash: str = Field(min_length=1, max_length=200)
+    classes: list[str] = Field(min_length=1)
+    training_data_hash: str | None = Field(default=None, max_length=200)
+    model_card_ref: str | None = Field(default=None, max_length=2000)
+    datasheet_ref: str | None = Field(default=None, max_length=2000)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class ModelVersionResponse(BaseModel):
+    id: UUID
+    version: str
+    artefact_hash: str
+    training_data_hash: str | None
+    classes: list[str]
+    model_card_ref: str | None
+    datasheet_ref: str | None
+    approved_by: UUID | None
+    approved_at: datetime | None
+    deployed_at: datetime | None
+    notes: str | None

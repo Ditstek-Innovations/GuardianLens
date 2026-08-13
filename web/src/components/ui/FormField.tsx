@@ -1,5 +1,7 @@
 import { cloneElement, useId } from 'react';
 
+import { cn } from '@/lib/utils/cn';
+
 import type { ReactElement } from 'react';
 
 interface FieldControlProps {
@@ -14,6 +16,8 @@ export interface FormFieldProps {
   readonly error?: string | undefined;
   readonly hint?: string | undefined;
   readonly required?: boolean;
+  /** Layout hook for the wrapper (grid column spans, widths) — nothing visual. */
+  readonly className?: string | undefined;
   readonly children: ReactElement<FieldControlProps>;
 }
 
@@ -21,7 +25,14 @@ export interface FormFieldProps {
  * CS-FM-03 / CS-FM-09 — label association, error rendering (`aria-invalid` +
  * `aria-describedby`, error as text) and required-marking implemented once.
  */
-export const FormField = ({ label, error, hint, required = false, children }: FormFieldProps) => {
+export const FormField = ({
+  label,
+  error,
+  hint,
+  required = false,
+  className,
+  children,
+}: FormFieldProps) => {
   const id = useId();
   const errorId = `${id}-error`;
   const hintId = `${id}-hint`;
@@ -38,7 +49,7 @@ export const FormField = ({ label, error, hint, required = false, children }: Fo
   });
 
   return (
-    <div className="space-y-1">
+    <div className={cn('space-y-1', className)}>
       <label htmlFor={id} className="block text-sm font-medium text-fg">
         {label}
         {required ? <span aria-hidden="true"> *</span> : null}

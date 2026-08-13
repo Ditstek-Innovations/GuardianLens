@@ -11,9 +11,12 @@ principal and a registered model version exist, then composes the real edge
 agent (guardian_lens_edge) against the live API: config pull, scenario run,
 outbox, publish. The event lands in the review queue at :5173.
 
-Agent principals and model versions have no API surface yet (follow-up in
-Docs/WORKFLOW.md 7), so this script seeds them the way an operator would:
-directly in the tenant database.
+Agent principals and model versions DO have an API now (POST /api/v1/agents,
+POST /api/v1/model-versions — WORKFLOW.md 7 gap 1, closed). This script keeps
+seeding them directly in the tenant database because it must re-run
+idempotently against the same 'demo-edge' agent, rotating its secret in
+place; an operator registering a real device uses the API and receives the
+one-time credential there.
 """
 
 from __future__ import annotations
@@ -203,6 +206,9 @@ def main() -> int:
             return 1
         token = login.json()["access_token"]
 
+        print(f"*** DEMO DATA: seeding synthetic configuration and events into "
+              f"tenant '{TENANT}'. Never point this at a real site's tenant — "
+              f"real tenants stay real-only (WORKFLOW.md 3b). ***")
         print("ensuring site configuration…")
         site_id, camera_id = ensure_configuration(client, token)
         print("ensuring agent principal + model version…")

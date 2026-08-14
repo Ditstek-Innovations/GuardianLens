@@ -122,6 +122,7 @@ export const SitesSection = () => {
         query={sitesQuery}
         emptyDetail="No sites are configured."
         actions={form}
+        actionLabel="Add site"
       >
         {(sites) => (
           <table className="w-full text-left text-sm">

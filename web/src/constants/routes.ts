@@ -8,6 +8,7 @@ export const ROUTES = {
   resetPassword: '/reset-password',
   queue: '/queue',
   queueEvent: (eventId: string): string => `/queue/${eventId}`,
+  history: '/history',
   reports: '/reports',
   config: '/config',
   audit: '/audit',

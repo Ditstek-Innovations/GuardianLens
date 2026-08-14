@@ -63,6 +63,8 @@ export interface QueueEventItem {
   status: EventStatus;
   evidence_url: string;
   version: number;
+  /** FR-013 — which model produced the detection; null for nvr-sourced. */
+  model_version?: string | null;
   /** ASSUMPTION A-2 — IANA zone for display (NFR-L-02); not in the TRD §10.4 sample. */
   site_timezone?: string;
 }
@@ -204,4 +206,18 @@ export interface AuditEntry {
 export interface ListResponse<T> {
   items: T[];
   next_cursor?: string | null;
+}
+
+/** Gate-G1 evidence trail (TRD §10.6) — registration is not deployment. */
+export interface ModelVersionSummary {
+  id: string;
+  version: string;
+  artefact_hash: string;
+  classes: string[];
+  model_card_ref: string | null;
+  datasheet_ref: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  deployed_at: string | null;
+  notes: string | null;
 }

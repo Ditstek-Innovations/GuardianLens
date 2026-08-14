@@ -7,6 +7,7 @@ import { AuditPage } from '@/features/audit';
 import { ForgotPasswordPage, LoginPage, ResetPasswordPage, SignupPage } from '@/features/auth';
 import { ConfigPage } from '@/features/config';
 import { EventDetailPage } from '@/features/event-detail';
+import { HistoryPage } from '@/features/event-history';
 import { QueuePage } from '@/features/review-queue';
 import { ReportsPage } from '@/features/reports';
 
@@ -99,6 +100,8 @@ export const AppRouter = () => (
       <Route path="/" element={<Navigate to={ROUTES.queue} replace />} />
       <Route path={ROUTES.queue} element={<QueuePage />} />
       <Route path={ROUTE_PATTERNS.queueEvent} element={<EventDetailPage />} />
+      {/* SCR-4 — every authenticated role reads history (§23.4). */}
+      <Route path={ROUTES.history} element={<HistoryPage />} />
       <Route
         path={ROUTES.reports}
         element={

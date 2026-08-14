@@ -159,7 +159,7 @@ export const ZonesSection = () => {
         description="Regions within a camera's view that detection rules apply to."
         query={zonesQuery}
         emptyDetail="No zones are defined."
-        {...(form !== undefined ? { actions: form } : {})}
+        {...(form !== undefined ? { actions: form, actionLabel: 'Add zone' } : {})}
       >
         {(zones) => (
           <table className="w-full text-left text-sm">

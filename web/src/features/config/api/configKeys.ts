@@ -6,4 +6,5 @@ export const configKeys = {
   zones: () => [...configKeys.all, 'zones'] as const,
   rules: () => [...configKeys.all, 'rules'] as const,
   agents: () => [...configKeys.all, 'agents'] as const,
+  models: () => [...configKeys.all, 'models'] as const,
 };

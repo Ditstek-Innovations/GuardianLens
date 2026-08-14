@@ -226,6 +226,7 @@ export const RulesSection = () => {
       query={rulesQuery}
       emptyDetail="No rules are defined."
       actions={form}
+      actionLabel="Add rule"
     >
       {(rules) => (
         <>

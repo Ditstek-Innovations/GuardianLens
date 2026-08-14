@@ -107,8 +107,11 @@ class EventDetail(BaseModel):
     id: UUID
     event_id: UUID
     camera_id: UUID
+    camera: QueueCamera
     zone_id: UUID | None
+    zone: QueueZone
     rule_id: UUID | None
+    rule: QueueRule
     rule_snapshot: dict[str, Any]
     source: str
     confidence: float | None

@@ -77,7 +77,15 @@ export interface QueuePage {
 export interface EventDetail extends QueueEventItem {
   /** ASSUMPTION A-3 — receipt time on the detail response (ADR-007 delay display). */
   received_at?: string;
-  rule_snapshot: { type: string; threshold: number; human_readable: string };
+  /** The rule exactly as it stood when the event fired — frozen at ingest,
+   * independent of any later edit to the live rule row. */
+  rule_snapshot: {
+    human_readable: string;
+    rule_type: string;
+    confidence_threshold: number;
+    debounce_seconds: number;
+    dwell_seconds: number | null;
+  };
 }
 
 export interface DecisionResponse {

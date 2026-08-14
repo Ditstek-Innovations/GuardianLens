@@ -351,7 +351,7 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
         <Detail
           wide
           label="Rule as it fired (snapshot)"
-          value={`${event.rule_snapshot.human_readable} · type ${event.rule_snapshot.type} · threshold ${event.rule_snapshot.threshold}`}
+          value={`${event.rule_snapshot.human_readable} · type ${event.rule_snapshot.rule_type} · threshold ${event.rule_snapshot.confidence_threshold}`}
         />
       </dl>
 

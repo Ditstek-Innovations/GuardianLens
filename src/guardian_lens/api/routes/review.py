@@ -120,8 +120,14 @@ def get_event(
         id=row.id,
         event_id=row.event_id,
         camera_id=row.camera_id,
+        camera=QueueCamera(id=row.camera_id, name=row.camera_name),
         zone_id=row.zone_id,
+        zone=QueueZone(id=row.zone_id, name=row.zone_name),
         rule_id=row.rule_id,
+        rule=QueueRule(
+            human_readable=row.rule_human_readable
+            or (row.rule_snapshot or {}).get("human_readable")
+        ),
         rule_snapshot=row.rule_snapshot,
         source=row.source,
         confidence=float(row.confidence) if row.confidence is not None else None,

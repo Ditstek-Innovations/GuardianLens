@@ -18,7 +18,13 @@ import type { EventDetail } from '@/lib/api/types';
 
 const makeEventDetail = (): EventDetail => ({
   ...makeQueueEvent(),
-  rule_snapshot: { type: 'presence', threshold: 1, human_readable: 'Helmet required in Bay 3' },
+  rule_snapshot: {
+    rule_type: 'ppe_helmet',
+    confidence_threshold: 1,
+    human_readable: 'Helmet required in Bay 3',
+    debounce_seconds: 30,
+    dwell_seconds: null,
+  },
 });
 
 const stubApi = (): void => {

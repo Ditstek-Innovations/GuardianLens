@@ -44,6 +44,30 @@ _AGENT_PUBLIC = [
     agents.c.clock_skew_ms,
 ]
 
+#: The stored `cameras.status` column only ever holds what an admin set
+#: (active on creation, or disabled/active via the enable/disable toggle —
+#: ConfigurationService.update_camera). It carries no signal from the edge.
+#: The live signal already exists — the same coverage-gap row the "prove
+#: honesty" test in CAMERA_INTEGRATION.md §5 reads — so status is derived,
+#: never a second value that could drift out of sync with it. An admin
+#: disable always wins over stream state; otherwise an OPEN stream_lost gap
+#: (ended_at IS NULL) means disconnected. 'degraded' has no signal path yet
+#: (MOD-1's decode-failure streak is edge-log-only, no persisted gap).
+_CAMERA_LIVE_STATUS = sa.case(
+    (cameras.c.status == "disabled", cameras.c.status),
+    (
+        sa.exists(
+            sa.select(1).where(
+                coverage_gaps.c.camera_id == cameras.c.id,
+                coverage_gaps.c.reason == "stream_lost",
+                coverage_gaps.c.ended_at.is_(None),
+            )
+        ),
+        sa.literal("disconnected"),
+    ),
+    else_=cameras.c.status,
+).label("status")
+
 #: Camera columns safe for any response or audit path. stream_url_encrypted
 #: is deliberately absent — it never leaves the repository except toward the
 #: agent config document.
@@ -54,7 +78,7 @@ _CAMERA_PUBLIC = [
     cameras.c.location_description,
     cameras.c.stream_profile,
     cameras.c.sample_rate_fps,
-    cameras.c.status,
+    _CAMERA_LIVE_STATUS,
     cameras.c.created_at,
     cameras.c.updated_at,
 ]

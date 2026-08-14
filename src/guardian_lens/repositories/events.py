@@ -169,9 +169,26 @@ class EventRepository:
 
     def get_scoped(self, event_pk: UUID, site_ids: Iterable[UUID]) -> sa.Row | None:
         """One event, only if it lies inside the caller's site scope.
-        Out-of-scope and non-existent are indistinguishable to the caller."""
+        Out-of-scope and non-existent are indistinguishable to the caller.
+
+        Joined the same way as queue_page — the detail view is a superset
+        of a queue row (every events.* column, plus the display names the
+        review UI needs), never a disjoint shape."""
         return self._session.execute(
-            sa.select(events).where(
+            sa.select(
+                events,
+                cameras.c.name.label("camera_name"),
+                zones.c.name.label("zone_name"),
+                detection_rules.c.human_readable.label("rule_human_readable"),
+            )
+            .select_from(
+                events.join(cameras, events.c.camera_id == cameras.c.id)
+                .outerjoin(zones, events.c.zone_id == zones.c.id)
+                .outerjoin(
+                    detection_rules, events.c.rule_id == detection_rules.c.id
+                )
+            )
+            .where(
                 events.c.id == event_pk,
                 events.c.site_id.in_(list(site_ids)),
             )

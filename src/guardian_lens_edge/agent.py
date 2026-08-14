@@ -29,6 +29,7 @@ from guardian_lens_edge.config_sync import ConfigSync
 from guardian_lens_edge.detector import (
     Detector,
     NullDetector,
+    OnnxDetector,
     SyntheticDetector,
 )
 from guardian_lens_edge.events import EventBuilder, iso_utc
@@ -428,6 +429,25 @@ def _build_parser() -> argparse.ArgumentParser:
         "newest sample is dropped and counted (default "
         f"{DEFAULT_QUEUE_CAPACITY}; env GL_QUEUE_CAPACITY).",
     )
+    # Real detection in rtsp mode — GOVERNANCE.md 9 gate G1 territory. Both
+    # flags are required together; OnnxDetector verifies the artefact's
+    # SHA-256 against the manifest and refuses to start on any mismatch, so
+    # only the exact reviewed artefact can ever run.
+    parser.add_argument(
+        "--model",
+        default=os.environ.get("GL_MODEL_PATH"),
+        help="Path to an ONNX detection model (rtsp mode only; requires "
+        "--model-manifest; env GL_MODEL_PATH). Without it, rtsp mode runs "
+        "the NullDetector — ingestion only, no detection. Deploying a "
+        "model to a SITE remains gated on GOVERNANCE.md 9 gate G1.",
+    )
+    parser.add_argument(
+        "--model-manifest",
+        default=os.environ.get("GL_MODEL_MANIFEST"),
+        help="Path to the model's manifest JSON (version, artefact_sha256, "
+        "classes; env GL_MODEL_MANIFEST). The SHA-256 is verified before "
+        "the model loads.",
+    )
     return parser
 
 
@@ -568,8 +588,6 @@ def main(argv: list[str] | None = None) -> int:
     frame_source: FrameSource
     detector: Detector
     if args.source == "rtsp":
-        # Real ingestion, no real detection: the NullDetector counts
-        # frames and returns no detections until a model passes gate G1.
         if unsealer is None:  # pragma: no cover - unreachable by parsing
             raise RuntimeError("rtsp mode requires an unsealer")
         frame_source = MultiCameraSource(
@@ -578,7 +596,24 @@ def main(argv: list[str] | None = None) -> int:
             decode_failure_threshold=args.decode_failure_threshold,
             queue_capacity=args.queue_capacity,
         )
-        detector = NullDetector()
+        if args.model or args.model_manifest:
+            # Both or neither: a model without its manifest cannot be
+            # verified, and a manifest without a model describes nothing.
+            if not (args.model and args.model_manifest):
+                parser.error("--model and --model-manifest go together")
+            # OnnxDetector raises ModelVerificationError on any hash or
+            # manifest problem — the agent refuses to start rather than
+            # run an unverified artefact (TRD 5.6).
+            detector = OnnxDetector(args.model, args.model_manifest)
+            logging.getLogger(__name__).info(
+                "OnnxDetector loaded: model_version=%s",
+                detector.model_version,
+            )
+        else:
+            # Real ingestion, no real detection: the NullDetector counts
+            # frames and returns no detections until a model passes gate
+            # G1 and is stated explicitly via --model/--model-manifest.
+            detector = NullDetector()
     else:
         scenario = Scenario.load(args.scenario)
         frame_source = SyntheticSource(scenario, start_at=start_at)

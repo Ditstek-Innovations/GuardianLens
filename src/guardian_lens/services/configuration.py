@@ -297,6 +297,7 @@ class ConfigurationService:
         human_readable: str,
         written_rule_reference: str | None,
         detection_class: str,
+        must_be_carried: bool,
         ip_address: str | None,
     ) -> sa.Row:
         site_id = self._config.zone_site(zone_id)
@@ -317,6 +318,7 @@ class ConfigurationService:
                 "human_readable": human_readable,
                 "written_rule_reference": written_rule_reference,
                 "detection_class": detection_class,
+                "must_be_carried": must_be_carried,
                 "created_by": principal.user_id,
             }
         )
@@ -333,6 +335,7 @@ class ConfigurationService:
                 "debounce_seconds": debounce_seconds,
                 "human_readable": human_readable,
                 "detection_class": detection_class,
+                "must_be_carried": must_be_carried,
             },
             ip_address=ip_address,
         )

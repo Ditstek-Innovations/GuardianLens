@@ -58,6 +58,7 @@ def make_config(
     dwell_seconds: int | None = None,
     polygon: list[tuple[float, float]] | None = None,
     config_version: int = 1,
+    must_be_carried: bool = False,
 ) -> AgentConfig:
     return AgentConfig(
         config_version=config_version,
@@ -80,6 +81,7 @@ def make_config(
                 confidence_threshold=confidence_threshold,
                 debounce_seconds=debounce_seconds,
                 dwell_seconds=dwell_seconds,
+                must_be_carried=must_be_carried,
                 human_readable="Helmet required in Bay 3",
             )
         ],

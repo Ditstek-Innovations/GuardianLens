@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { Button, Chip, ChipIcon, FormField, Input, Select } from '@/components/ui';
+import { Button, Checkbox, Chip, ChipIcon, FormField, Input, Select } from '@/components/ui';
 import { MESSAGES } from '@/constants/messages';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
@@ -39,6 +39,7 @@ export const RulesSection = () => {
   const [dwell, setDwell] = useState('');
   const [writtenRef, setWrittenRef] = useState('');
   const [detectionClass, setDetectionClass] = useState('person_without_helmet');
+  const [mustBeCarried, setMustBeCarried] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const zones = zonesQuery.data ?? [];
@@ -85,6 +86,7 @@ export const RulesSection = () => {
         humanReadable: trimmedName,
         writtenRuleReference: writtenRef.trim() === '' ? null : writtenRef.trim(),
         detectionClass: trimmedDetectionClass,
+        mustBeCarried,
       },
       {
         onSuccess: () => {
@@ -209,6 +211,19 @@ export const RulesSection = () => {
         />
       </FormField>
       <FormField
+        label="Person context"
+        hint="Fire only when the detected object sits within a detected person — e.g. a phone in a hand, not one lying on a desk."
+        className="lg:col-span-3"
+      >
+        <div className="flex h-10 items-center">
+          <Checkbox
+            label="Must be attached to a person"
+            checked={mustBeCarried}
+            onChange={(event) => setMustBeCarried(event.target.checked)}
+          />
+        </div>
+      </FormField>
+      <FormField
         label="Dwell (seconds)"
         hint="How long the condition must persist before firing. Empty fires on the first frame."
         className="lg:col-span-2"
@@ -268,7 +283,10 @@ export const RulesSection = () => {
                 <tr key={rule.id} className="h-10 transition-colors duration-120 hover:bg-surface-2">
                   <td className="px-4 py-2 text-fg">{rule.human_readable}</td>
                   <td className="px-4 py-2 text-fg-muted">{rule.rule_type}</td>
-                  <td className="px-4 py-2 font-mono text-xs text-fg-muted">{rule.detection_class}</td>
+                  <td className="px-4 py-2 font-mono text-xs text-fg-muted">
+                    {rule.detection_class}
+                    {rule.must_be_carried ? ' · on-person' : ''}
+                  </td>
                   <td className="px-4 py-2 text-fg-muted">
                     {rule.debounce_seconds}s debounce
                     {rule.dwell_seconds != null ? `, ${rule.dwell_seconds}s dwell` : ''}

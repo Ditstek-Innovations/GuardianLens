@@ -17,6 +17,8 @@ export interface CreateRuleInput {
   readonly writtenRuleReference: string | null;
   /** The model-output class this rule watches for, e.g. "person_without_helmet". */
   readonly detectionClass: string;
+  /** Held-vs-lying: fire only when the condition is attached to a person. */
+  readonly mustBeCarried: boolean;
 }
 
 /**
@@ -37,6 +39,7 @@ export const useCreateRule = () => {
         human_readable: input.humanReadable,
         written_rule_reference: input.writtenRuleReference,
         detection_class: input.detectionClass,
+        must_be_carried: input.mustBeCarried,
       }),
     onSettled: () => {
       // CS-D-05 — invalidate precisely.

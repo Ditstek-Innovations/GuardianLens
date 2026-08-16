@@ -57,6 +57,7 @@ const SlashCircleIcon = () => (
   </svg>
 );
 
+
 // Domain-aware, so it lives outside components/ui (CS-U-02).
 // NFR-ACC-02 — text + icon for every status; colour is never the sole signal.
 const presentationFor = (status: EventStatus): StatusPresentation => {

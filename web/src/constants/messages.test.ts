@@ -5,11 +5,20 @@ import { describe, expect, it } from 'vitest';
 
 import { MESSAGES } from './messages';
 
-type CatalogueNode = string | ((name: string) => string) | { readonly [key: string]: CatalogueNode };
+// Parameterised entries take a name or a count; the walker exercises both.
+type CatalogueNode =
+  | string
+  | ((arg: never) => string)
+  | { readonly [key: string]: CatalogueNode };
+
+const invoke = (fn: (arg: never) => string): string => {
+  const sample = (fn as (arg: string | number) => string)('Sample rule');
+  return typeof sample === 'string' ? sample : String(sample);
+};
 
 const collectMessages = (node: CatalogueNode, path: string): ReadonlyArray<[string, string]> => {
   if (typeof node === 'string') return [[path, node]];
-  if (typeof node === 'function') return [[path, node('Sample rule')]];
+  if (typeof node === 'function') return [[path, invoke(node)]];
   return Object.entries(node).flatMap(([key, child]) => collectMessages(child, `${path}.${key}`));
 };
 

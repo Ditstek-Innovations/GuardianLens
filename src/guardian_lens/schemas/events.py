@@ -95,6 +95,9 @@ class QueueItem(BaseModel):
     version: int
     # FR-013 — which model produced the detection; None for nvr-sourced.
     model_version: str | None = None
+    # NFR-L-02 — timestamps render in the site's clock; viewer-local only
+    # when a site zone is genuinely absent.
+    site_timezone: str | None = None
 
 
 class QueueResponse(BaseModel):
@@ -126,6 +129,7 @@ class IncidentGroup(BaseModel):
     last_occurred_at: datetime
     max_confidence: float | None
     status: str
+    site_timezone: str | None
     event_ids: list[UUID]
 
 
@@ -161,6 +165,7 @@ class EventDetail(BaseModel):
     # None exactly while status is 'unverified'.
     reviewer: DecisionReviewer | None
     decided_at: datetime | None
+    site_timezone: str | None
     version: int
 
 

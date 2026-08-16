@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ToastProvider } from '@/components/ui';
+import { AuthContext } from '@/hooks/useAuth';
 import {
   jsonResponse,
   makeIncidentGroup,
@@ -33,11 +35,24 @@ const renderQueuePage = () => {
     defaultOptions: { queries: { retry: false } },
   });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <QueuePage />
-      </MemoryRouter>
-    </QueryClientProvider>,
+    // A reviewer principal: the page renders; the site-admin AI-review
+    // toggle stays absent for this role (absent, not disabled).
+    <AuthContext.Provider
+      value={{
+        principal: { id: 'user-1', fullName: 'A. Reviewer', roles: ['reviewer'] },
+        restoring: false,
+        signIn: async () => undefined,
+        signOut: () => undefined,
+      }}
+    >
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter>
+            <QueuePage />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    </AuthContext.Provider>,
   );
 };
 

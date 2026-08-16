@@ -91,6 +91,8 @@ export interface IncidentGroup {
   last_occurred_at: string;
   max_confidence: number | null;
   status: string;
+  /** NFR-L-02 — times on this group render in the site's clock. */
+  site_timezone?: string | null;
   event_ids: string[];
 }
 
@@ -223,6 +225,8 @@ export interface RuleSummary {
   human_readable: string;
   /** The model-output class this rule watches for, e.g. "person_without_helmet". */
   detection_class: string;
+  /** Fire only when the condition's box sits inside a detected person's box. */
+  must_be_carried: boolean;
   /** ASSUMPTION A-8 — who activated the rule (BR-C-02); TRD §9.4 defines created_by only. */
   activated_by?: { id: string; full_name: string } | null;
 }

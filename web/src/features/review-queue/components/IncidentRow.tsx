@@ -49,10 +49,11 @@ export const IncidentRow = ({
             </p>
             <p className="mt-0.5 text-xs tabular-nums text-fg-muted">
               {isOngoing
-                ? `${formatTimestamp(incident.first_occurred_at)} – ${formatTimestamp(
+                ? `${formatTimestamp(incident.first_occurred_at, incident.site_timezone ?? undefined)} – ${formatTimestamp(
                     incident.last_occurred_at,
+                    incident.site_timezone ?? undefined,
                   )}`
-                : formatTimestamp(incident.first_occurred_at)}
+                : formatTimestamp(incident.first_occurred_at, incident.site_timezone ?? undefined)}
               {incident.max_confidence !== null ? (
                 <>
                   {' · '}

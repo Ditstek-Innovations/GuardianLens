@@ -50,7 +50,8 @@ AUDIT_FIELD_ALLOWLIST: dict[str, frozenset[str]] = {
         {
             "zone_id", "rule_type", "is_active", "confidence_threshold",
             "debounce_seconds", "dwell_seconds", "human_readable",
-            "written_rule_reference", "detection_class", "activated_by",
+            "written_rule_reference", "detection_class",
+            "must_be_carried", "activated_by",
             "activated_at", "deactivated_at",
         }
     ),

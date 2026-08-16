@@ -76,6 +76,30 @@ class CandidateDecision:
     confidence: float
     occurred_at: datetime  # frame clock — the edge observation time, ADR-007
     frame: Frame
+    # The triggering detection's box (x1,y1,x2,y2 normalised) — carried so
+    # the evidence frame can be annotated with WHAT fired and WHERE.
+    bbox_norm: tuple[float, float, float, float] | None = None
+
+
+#: A person detection must itself be reasonably confident before it can
+#: serve as context — a 0.05 ghost must not turn a lying phone into a
+#: held one. Deterministic constant, documented here, applied everywhere.
+_PERSON_CONTEXT_FLOOR = 0.50
+
+
+def _inside_a_person(candidate, detections) -> bool:
+    """True when the candidate's bbox centre lies inside any person bbox."""
+    cx = (candidate.bbox_norm[0] + candidate.bbox_norm[2]) / 2
+    cy = (candidate.bbox_norm[1] + candidate.bbox_norm[3]) / 2
+    for other in detections:
+        if other.class_name != "person":
+            continue
+        if other.confidence < _PERSON_CONTEXT_FLOOR:
+            continue
+        x1, y1, x2, y2 = other.bbox_norm
+        if x1 <= cx <= x2 and y1 <= cy <= y2:
+            return True
+    return False
 
 
 def bbox_anchor(bbox_norm: tuple[float, float, float, float]) -> Point:
@@ -225,6 +249,7 @@ class RuleEvaluator:
         bucket = _hour_bucket(frame.captured_at)
         key = (frame.camera_id, zone.zone_id, rule.rule_id)
         best_confidence: float | None = None
+        best_bbox: tuple[float, float, float, float] | None = None
         for detection in detections:
             if detection.class_name != rule.detection_class:
                 # Not this rule's condition; another rule may consume it.
@@ -249,8 +274,23 @@ class RuleEvaluator:
                     CounterKind.OUTSIDE_ZONE,
                 )
                 continue
+            # Person-context — the held-vs-lying discriminator. Purely
+            # per-frame geometry (BR-D-03: deterministic, no inference
+            # after detection): the condition's bbox centre must lie inside
+            # some person detection's bbox. No identity is read or kept.
+            if rule.must_be_carried and not _inside_a_person(
+                detection, detections
+            ):
+                self._counters.increment_counter(
+                    bucket,
+                    frame.camera_id,
+                    rule.rule_id,
+                    CounterKind.CONTEXT_UNMET,
+                )
+                continue
             if best_confidence is None or detection.confidence > best_confidence:
                 best_confidence = detection.confidence
+                best_bbox = detection.bbox_norm
 
         if best_confidence is None:
             # Condition not observed this sample: a dwell run, if any, is
@@ -297,4 +337,5 @@ class RuleEvaluator:
             confidence=best_confidence,
             occurred_at=frame.captured_at,
             frame=frame,
+            bbox_norm=best_bbox,
         )

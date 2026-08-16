@@ -60,6 +60,10 @@ class RuleConfig(BaseModel):
     dwell_seconds: int | None = Field(default=None, ge=0)
     human_readable: str
     detection_class: str = "person_without_helmet"
+    # Held-vs-lying discriminator: when True the condition only fires if
+    # its bbox centre lies INSIDE a detected person's bbox (deterministic
+    # frame geometry — BR-D-03; no identity, no tracking).
+    must_be_carried: bool = False
 
 
 class AgentConfig(BaseModel):

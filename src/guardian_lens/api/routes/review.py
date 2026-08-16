@@ -100,6 +100,7 @@ def list_events(
                 evidence_url=_evidence_url(row.id, row.evidence_state),
                 version=row.version,
                 model_version=row.model_version,
+                site_timezone=row.site_timezone,
             )
             for row in rows
         ],
@@ -156,6 +157,7 @@ def list_incidents(
                     default=None,
                 ),
                 status=group[0].status,
+                site_timezone=group[0].site_timezone,
                 event_ids=[r.id for r in group],
             )
             for group in groups
@@ -207,6 +209,7 @@ def get_event(
             else None
         ),
         decided_at=row.decided_at,
+        site_timezone=row.site_timezone,
         version=row.version,
     )
 

@@ -34,8 +34,9 @@ from guardian_lens.repositories.tables import (
     detection_rules,
     event_corrections,
     events,
-    users,
     model_versions,
+    sites,
+    users,
     zones,
 )
 
@@ -161,6 +162,9 @@ class EventRepository:
                 events.c.version,
                 # FR-013 — the analysing model, named on every capture.
                 model_versions.c.version.label("model_version"),
+                # NFR-L-02 / CS-FMT-02 — timestamps render in the SITE's
+                # clock; the zone ships with every row carrying a time.
+                sites.c.timezone.label("site_timezone"),
             )
             .select_from(
                 events.join(cameras, events.c.camera_id == cameras.c.id)
@@ -172,6 +176,7 @@ class EventRepository:
                     model_versions,
                     events.c.model_version_id == model_versions.c.id,
                 )
+                .join(sites, events.c.site_id == sites.c.id)
             )
             .where(*conditions)
             .order_by(events.c.received_at.asc(), events.c.id.asc())
@@ -237,9 +242,11 @@ class EventRepository:
                 events.c.status,
                 events.c.evidence_state,
                 events.c.version,
+                sites.c.timezone.label("site_timezone"),
             )
             .select_from(
                 events.join(cameras, events.c.camera_id == cameras.c.id)
+                .join(sites, events.c.site_id == sites.c.id)
                 .outerjoin(zones, events.c.zone_id == zones.c.id)
                 .outerjoin(
                     detection_rules, events.c.rule_id == detection_rules.c.id
@@ -279,9 +286,11 @@ class EventRepository:
                 # BR-005 made visible: the reviewer NAME travels with the
                 # decided event, not just the id.
                 users.c.full_name.label("reviewer_full_name"),
+                sites.c.timezone.label("site_timezone"),
             )
             .select_from(
                 events.join(cameras, events.c.camera_id == cameras.c.id)
+                .join(sites, events.c.site_id == sites.c.id)
                 .outerjoin(zones, events.c.zone_id == zones.c.id)
                 .outerjoin(
                     detection_rules, events.c.rule_id == detection_rules.c.id

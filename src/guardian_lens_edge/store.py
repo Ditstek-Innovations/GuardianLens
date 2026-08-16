@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS detection_counters (
     outside_zone        INTEGER NOT NULL DEFAULT 0,
     debounce_suppressed INTEGER NOT NULL DEFAULT 0,
     dwell_unmet         INTEGER NOT NULL DEFAULT 0,
+    context_unmet       INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (bucket_start, camera_id, rule_id)
 );
 """
@@ -117,6 +118,9 @@ class CounterKind(str, enum.Enum):
     OUTSIDE_ZONE = "outside_zone"
     DEBOUNCE_SUPPRESSED = "debounce_suppressed"
     DWELL_UNMET = "dwell_unmet"
+    #: The rule required the condition to be attached to a person and the
+    #: frame's geometry did not support it (held-vs-lying discriminator).
+    CONTEXT_UNMET = "context_unmet"
 
 
 class BackpressureLevel(enum.Enum):
@@ -157,6 +161,13 @@ _COUNTER_SQL = {
         " VALUES (?, ?, ?, 1)"
         " ON CONFLICT(bucket_start, camera_id, rule_id)"
         " DO UPDATE SET dwell_unmet = dwell_unmet + 1"
+    ),
+    CounterKind.CONTEXT_UNMET: (
+        "INSERT INTO detection_counters"
+        " (bucket_start, camera_id, rule_id, context_unmet)"
+        " VALUES (?, ?, ?, 1)"
+        " ON CONFLICT(bucket_start, camera_id, rule_id)"
+        " DO UPDATE SET context_unmet = context_unmet + 1"
     ),
 }
 
@@ -224,6 +235,20 @@ class EdgeStore:
         self._conn.execute("PRAGMA foreign_keys = ON")
         with self._conn:
             self._conn.executescript(_SCHEMA)
+            # Additive store evolution: a DB created before context_unmet
+            # existed gains the column in place (CREATE IF NOT EXISTS does
+            # not alter an existing table).
+            columns = {
+                row[1]
+                for row in self._conn.execute(
+                    "PRAGMA table_info(detection_counters)"
+                )
+            }
+            if "context_unmet" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE detection_counters"
+                    " ADD COLUMN context_unmet INTEGER NOT NULL DEFAULT 0"
+                )
 
     def close(self) -> None:
         self._conn.close()

@@ -235,6 +235,7 @@ def create_rule(
         human_readable=body.human_readable,
         written_rule_reference=body.written_rule_reference,
         detection_class=body.detection_class,
+        must_be_carried=body.must_be_carried,
         ip_address=_ip(request),
     )
     return RuleResponse.model_validate(row._mapping)

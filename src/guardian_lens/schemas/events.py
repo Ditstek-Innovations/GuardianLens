@@ -93,6 +93,8 @@ class QueueItem(BaseModel):
     status: str
     evidence_url: str | None
     version: int
+    # FR-013 — which model produced the detection; None for nvr-sourced.
+    model_version: str | None = None
 
 
 class QueueResponse(BaseModel):

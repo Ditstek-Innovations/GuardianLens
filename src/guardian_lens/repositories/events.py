@@ -35,6 +35,7 @@ from guardian_lens.repositories.tables import (
     event_corrections,
     events,
     users,
+    model_versions,
     zones,
 )
 
@@ -158,12 +159,18 @@ class EventRepository:
                 events.c.status,
                 events.c.evidence_state,
                 events.c.version,
+                # FR-013 — the analysing model, named on every capture.
+                model_versions.c.version.label("model_version"),
             )
             .select_from(
                 events.join(cameras, events.c.camera_id == cameras.c.id)
                 .outerjoin(zones, events.c.zone_id == zones.c.id)
                 .outerjoin(
                     detection_rules, events.c.rule_id == detection_rules.c.id
+                )
+                .outerjoin(
+                    model_versions,
+                    events.c.model_version_id == model_versions.c.id,
                 )
             )
             .where(*conditions)

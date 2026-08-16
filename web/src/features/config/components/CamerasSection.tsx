@@ -389,6 +389,7 @@ export const CamerasSection = () => {
       query={camerasQuery}
       emptyDetail="No cameras are registered."
       actions={form}
+      actionLabel="Add camera"
     >
       {(cameras) => (
         <table className="w-full text-left text-sm">

@@ -99,6 +99,7 @@ def list_events(
                 status=row.status,
                 evidence_url=_evidence_url(row.id, row.evidence_state),
                 version=row.version,
+                model_version=row.model_version,
             )
             for row in rows
         ],

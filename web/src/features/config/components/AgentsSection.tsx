@@ -198,6 +198,7 @@ export const AgentsSection = () => {
         query={agentsQuery}
         emptyDetail="No agents are registered."
         actions={form}
+        actionLabel="Add agent"
       >
         {(agents) => (
           <table className="w-full text-left text-sm">

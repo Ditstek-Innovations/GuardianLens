@@ -5,6 +5,7 @@ import { usePageTitle } from '@/hooks/usePageTitle';
 
 import { AgentsSection } from './AgentsSection';
 import { CamerasSection } from './CamerasSection';
+import { ModelsSection } from './ModelsSection';
 import { RulesSection } from './RulesSection';
 import { SitesSection } from './SitesSection';
 import { ZonesSection } from './ZonesSection';
@@ -33,6 +34,7 @@ export const ConfigPage = () => {
       {isSiteAdmin ? <AgentsSection /> : null}
       <ZonesSection />
       <RulesSection />
+      {isSiteAdmin ? <ModelsSection /> : null}
     </div>
   );
 };

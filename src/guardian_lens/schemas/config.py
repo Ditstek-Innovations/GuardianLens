@@ -104,6 +104,12 @@ class RuleCreate(BaseModel):
     dwell_seconds: int | None = Field(default=None, ge=0)
     human_readable: str = Field(min_length=1, max_length=2000)
     written_rule_reference: str | None = Field(default=None, max_length=2000)
+    # The model-output class name this rule watches for (ARCHITECTURE.md
+    # 6.1 D1 evaluator). Defaults to the original ppe_helmet trigger so
+    # every rule created before this field existed keeps working unchanged.
+    detection_class: str = Field(
+        default="person_without_helmet", min_length=1, max_length=100
+    )
 
 
 class RulePatch(BaseModel):
@@ -114,6 +120,7 @@ class RulePatch(BaseModel):
     dwell_seconds: int | None = Field(default=None, ge=0)
     human_readable: str | None = Field(default=None, min_length=1, max_length=2000)
     written_rule_reference: str | None = Field(default=None, max_length=2000)
+    detection_class: str | None = Field(default=None, min_length=1, max_length=100)
     # An is_active flip is routed through the explicit activation /
     # deactivation path, which records the named activator (BR-C-02).
     is_active: bool | None = None
@@ -129,6 +136,7 @@ class RuleResponse(BaseModel):
     dwell_seconds: int | None
     human_readable: str
     written_rule_reference: str | None
+    detection_class: str
     created_by: UUID
     activated_by: UUID | None
     activated_at: datetime | None

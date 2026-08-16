@@ -234,6 +234,7 @@ def create_rule(
         dwell_seconds=body.dwell_seconds,
         human_readable=body.human_readable,
         written_rule_reference=body.written_rule_reference,
+        detection_class=body.detection_class,
         ip_address=_ip(request),
     )
     return RuleResponse.model_validate(row._mapping)

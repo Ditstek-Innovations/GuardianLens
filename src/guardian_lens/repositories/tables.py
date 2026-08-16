@@ -116,6 +116,7 @@ detection_rules = sa.Table(
     sa.Column("dwell_seconds", sa.Integer),
     sa.Column("written_rule_reference", sa.Text),
     sa.Column("human_readable", sa.Text),
+    sa.Column("detection_class", sa.String(100)),
     sa.Column("created_by", _uuid),
     sa.Column("activated_by", _uuid),
     sa.Column("activated_at", _ts),

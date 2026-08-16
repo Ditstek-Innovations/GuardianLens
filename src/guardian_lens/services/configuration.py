@@ -296,6 +296,7 @@ class ConfigurationService:
         dwell_seconds: int | None,
         human_readable: str,
         written_rule_reference: str | None,
+        detection_class: str,
         ip_address: str | None,
     ) -> sa.Row:
         site_id = self._config.zone_site(zone_id)
@@ -315,6 +316,7 @@ class ConfigurationService:
                 "dwell_seconds": dwell_seconds,
                 "human_readable": human_readable,
                 "written_rule_reference": written_rule_reference,
+                "detection_class": detection_class,
                 "created_by": principal.user_id,
             }
         )
@@ -330,6 +332,7 @@ class ConfigurationService:
                 "confidence_threshold": confidence_threshold,
                 "debounce_seconds": debounce_seconds,
                 "human_readable": human_readable,
+                "detection_class": detection_class,
             },
             ip_address=ip_address,
         )

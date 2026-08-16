@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document | Coding Standards (Frontend — React + TypeScript) |
-| Version | 1.6 |
+| Version | 1.7 |
 | Status | Draft for review |
 | Programme phase | Week 3 — Govern · 8 August 2026 |
 | Applies to | `web/` — the Review Web App (TRD §7). Backend Python standards are a separate document. |
@@ -1011,7 +1011,7 @@ A standard that relies on human memory decays. Everything below runs in CI (TRD 
 | CS-D-01 | Scoped `no-restricted-globals: fetch` override; allow it only in the API transport module and test infrastructure |
 | CS-S-07 | `no-restricted-imports`: `redux`, `zustand`, `mobx`, `jotai` |
 | CS-ENV-01 | `no-restricted-properties` / `no-restricted-syntax` on `import.meta.env` outside `lib/env.ts` |
-| CS-AU-06 / CS-AU-07 | `no-restricted-syntax` on `localStorage`/`sessionStorage` writes outside `hooks/useLocalStorage` and the session-draft hook; secret scanner covers the rest. Token storage is a review item |
+| CS-AU-06 / CS-AU-07 / CS-AU-19 | `no-restricted-syntax` on `localStorage`/`sessionStorage` writes outside `hooks/useLocalStorage`, the session-draft hook and `lib/api/tokenStore` (the one sanctioned writer of the refresh credential); secret scanner covers the rest. Token storage is a review item |
 | CS-PG-01 / CS-PG-05 | `no-restricted-syntax` on `offset`/`page=` request params and on numeric literals passed as `limit` outside `constants/query.ts`; cursor opacity is a review item |
 | CS-SC-01 / CS-RT-01 | CI grep asserts every route in `router.tsx` has a `ROUTES` constant and a §23.1 row; a new screen fails the check until the TRD and this table are updated |
 | CS-A-* | `plugin:jsx-a11y/recommended` at error |
@@ -1171,7 +1171,7 @@ Each screen is a two-panel screen on `md` and above: **identity on the left, the
 | **CS-AU-04** | **A `401` renders one generic message: "Email or password is incorrect."** The UI never distinguishes an unknown account from a wrong password, never reveals whether an email exists, and never varies its wording or timing by cause — TRD §10.2 requires no user enumeration. It renders as persistent form-level text with `role="alert"`, not a toast that vanishes before it is read. |
 | **CS-AU-05** | A `429` (TRD §12.7: 5/min per IP, 10/hour per account) renders an honest, distinct message stating that too many attempts have been made and when to try again. The client never auto-retries a login and never silently swallows the limit into the generic credential error. |
 | **CS-AU-06** | Submit is disabled **only while the request is in flight** (CS-FM-05). The password is never logged, never written to `localStorage` or `sessionStorage`, never placed in a query string, and never included in an error report (CS-SEC-04). |
-| **CS-AU-07** | The access token is held **in memory only**; the refresh credential follows CS-SEC-06. Tokens never go to `localStorage`. Refresh is single-flight and centralised in the API client (CS-D-13) — no component refreshes a session. |
+| **CS-AU-07** | The access token is held **in memory only** and never persists anywhere. The refresh credential follows CS-SEC-06 and CS-AU-19: `sessionStorage` by default; `localStorage` only behind the user's explicit per-sign-in opt-in. Refresh is single-flight and centralised in the API client (CS-D-13) — no component refreshes a session. |
 | **CS-AU-08** | On success, redirect to the route the user was trying to reach, captured as an internal path before the redirect to login and **validated as a same-origin relative path** (CS-SEC-05) — an open redirect on the login screen is a credential-phishing surface. With no captured intent, the destination is the review queue. |
 | **CS-AU-09** | On a `401` from any request, the API client clears the principal, clears the query cache and routes to login preserving intent. On sign-out it clears the cache, `sessionStorage` drafts and any cached evidence URL (CS-SEC-07). A stale queue must never be visible after sign-out. |
 | **CS-AU-10** | *(Amended in 1.4 — the 1.3 rule prohibited these flows outright.)* Self-service **sign-up and password reset exist**; social sign-in does not. Both flows are **enumeration-safe by construction**: sign-up and reset-request return the same generic acceptance whether or not the account exists (`202`, one message), and no response, timing or wording ever distinguishes a known address from an unknown one. Sign-up is **deployment-gated** (`GL_SIGNUP_ENABLED`); a self-registered user holds **no role grants** until a `site_admin` assigns them (TRD §12.3) — signing up grants an identity, never access. |
@@ -1183,6 +1183,7 @@ Each screen is a two-panel screen on `md` and above: **identity on the left, the
 | **CS-AU-16** | Sign-up (SCR-1a) collects full name, email, **site code** and password. On acceptance it renders the generic outcome — account requested; a site admin assigns access — and routes to login. It never states whether the email or the site code was already known (CS-AU-10), and it renders the same acceptance whether the deployment has sign-up enabled or not. |
 | **CS-AU-17** | Forgot password (SCR-1b) collects only an email and always renders the same acceptance: "If that address has an account, a reset link has been sent." Reset (SCR-1c) takes its token from the URL, never re-displays it, submits token + new password, and on an invalid or expired token renders one generic failure with a route back to SCR-1b — never a hint about why the token failed. |
 | **CS-AU-18** | Auth screens link only to each other: login ↔ sign up ↔ forgot password, reset → login. No auth screen links into the application (CS-AU-01), and no application screen links back to sign-up. |
+| **CS-AU-19** | "Keep me signed in" is an explicit, per-sign-in, default-off checkbox. Checked, the refresh credential persists in `localStorage` (device session, bounded by the server's refresh TTL); unchecked, `sessionStorage` (dies with the tab). Exactly one store ever holds the credential; sign-out and refresh-chain death clear both. The mode chosen at sign-in survives token rotation. Preconditions for the `localStorage` mode: server-side rotation **with family reuse detection**, and the documented threat model in the token store. The copy states the bound honestly ("up to 7 days") and warns about shared computers. |
 
 ### 23.4 Roles and navigation
 
@@ -1284,6 +1285,7 @@ A change is not done until every line is true. This is the review checklist; use
 
 | Version | Date | Change | Author |
 |---|---|---|---|
+| 1.7 | 16 Aug 2026 | **CS-AU-19 added, CS-AU-07 amended by owner decision**: opt-in "Keep me signed in" moves the refresh credential to `localStorage` for the user who explicitly chooses it (rotation + family reuse detection required server-side; threat model documented in `tokenStore`); access token stays memory-only, unconditionally. `Checkbox` joins the ui primitives. | Kapil |
 | 1.6 | 12 Aug 2026 | §12.1 brand mark (shield-containing-lens, one inline-SVG component mirrored as the favicon, three placements only); new §12.2 voice rules CS-MSG-01…05: outcome–consequence message pattern with banned generic strings, one typed message catalogue, toast lifecycle/announcement/stacking rules, decision toasts naming the record consequence, enumeration-safe screens keep generic copy. | Kapil |
 | 1.5 | 12 Aug 2026 | **Design language (§12.1)** by owner direction: dark-first token system (surfaces, ink, cyan accent, status, validated categorical palette for charts/stat tiles in both themes), type/radius/elevation/motion/density scales; new CS-Y-09…13 (tokens-once via CSS variables, scale-only styling, palette re-validation duty, functional-motion limits, designed loading/empty/error states). | Kapil |
 | 1.4 | 12 Aug 2026 | **Amended CS-AU-10 by owner decision**: self-service sign-up (deployment-gated, no role grants on creation) and token-based password reset now exist; the 1.3 prohibition is preserved for social sign-in only. Auth screens become a family (SCR-1…SCR-1c) sharing one `AuthLayout`; added CS-AU-12…CS-AU-18: `PasswordInput` primitive with an accessible eye-icon toggle, §10-stack validation on auth forms, self-contained decorative background rules, NIST-style password policy (12–128, no composition rules), enumeration-safe sign-up/reset copy, and auth-screen linking rules. | Kapil |

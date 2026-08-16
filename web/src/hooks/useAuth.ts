@@ -13,7 +13,7 @@ export interface AuthContextValue {
   /** True while a reload-surviving session is being rebuilt from the
    * persisted refresh credential — guards must wait, not redirect. */
   readonly restoring: boolean;
-  readonly signIn: (email: string, password: string) => Promise<void>;
+  readonly signIn: (email: string, password: string, remember: boolean) => Promise<void>;
   readonly signOut: () => void;
 }
 

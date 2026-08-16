@@ -38,6 +38,7 @@ export const RulesSection = () => {
   const [debounce, setDebounce] = useState('30');
   const [dwell, setDwell] = useState('');
   const [writtenRef, setWrittenRef] = useState('');
+  const [detectionClass, setDetectionClass] = useState('person_without_helmet');
   const [formError, setFormError] = useState<string | null>(null);
 
   const zones = zonesQuery.data ?? [];
@@ -66,6 +67,11 @@ export const RulesSection = () => {
       setFormError('Dwell must be empty, or a whole number of seconds, 0 or more.');
       return;
     }
+    const trimmedDetectionClass = detectionClass.trim();
+    if (trimmedDetectionClass === '') {
+      setFormError('Detection class is required — the model-output class this rule watches for.');
+      return;
+    }
     setFormError(null);
     // No confirmation dialog here on purpose: creation is inert (BR-001,
     // created inactive always); activation below is the confirmed act.
@@ -78,6 +84,7 @@ export const RulesSection = () => {
         dwellSeconds: parsedDwell,
         humanReadable: trimmedName,
         writtenRuleReference: writtenRef.trim() === '' ? null : writtenRef.trim(),
+        detectionClass: trimmedDetectionClass,
       },
       {
         onSuccess: () => {
@@ -160,6 +167,17 @@ export const RulesSection = () => {
         </Select>
       </FormField>
       <FormField
+        label="Detection class"
+        required
+        hint="The model-output class this rule watches for, e.g. person_without_helmet, backpack. Must match a class the approved model actually emits."
+        className="lg:col-span-4"
+      >
+        <Input
+          value={detectionClass}
+          onChange={(event) => setDetectionClass(event.target.value)}
+        />
+      </FormField>
+      <FormField
         label="Confidence threshold"
         required
         hint="0–1. Orders and annotates candidates; it never decides (BR-V-03)."
@@ -234,6 +252,7 @@ export const RulesSection = () => {
               <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-fg-muted">
                 <th scope="col" className="h-10 px-4">Rule</th>
                 <th scope="col" className="h-10 px-4">Type</th>
+                <th scope="col" className="h-10 px-4">Detection class</th>
                 <th scope="col" className="h-10 px-4">Timing</th>
                 <th scope="col" className="h-10 px-4">State</th>
                 <th scope="col" className="h-10 px-4">Activated by</th>
@@ -248,6 +267,7 @@ export const RulesSection = () => {
                 <tr key={rule.id} className="h-10 transition-colors duration-120 hover:bg-surface-2">
                   <td className="px-4 py-2 text-fg">{rule.human_readable}</td>
                   <td className="px-4 py-2 text-fg-muted">{rule.rule_type}</td>
+                  <td className="px-4 py-2 font-mono text-xs text-fg-muted">{rule.detection_class}</td>
                   <td className="px-4 py-2 text-fg-muted">
                     {rule.debounce_seconds}s debounce
                     {rule.dwell_seconds != null ? `, ${rule.dwell_seconds}s dwell` : ''}

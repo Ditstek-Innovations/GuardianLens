@@ -367,6 +367,18 @@ ENFORCEMENT: tuple[Enforcement, ...] = (
         status=RuleStatus.COHERENCE,
         intent="A token that expires before it exists is a clock or code defect.",
     ),
+    Enforcement(
+        name="chk_detection_rules_detection_class_length",
+        kind=ObjectKind.CHECK,
+        table="detection_rules",
+        rules=(),
+        status=RuleStatus.COHERENCE,
+        intent=(
+            "An empty detection_class would be silently unreachable — no "
+            "model output could ever equal it, so the rule could never "
+            "fire and nothing would say why."
+        ),
+    ),
     # -- DATABASE.md 7.2 — indexes serving named queries -------------------
     Enforcement(
         name="idx_events_queue",

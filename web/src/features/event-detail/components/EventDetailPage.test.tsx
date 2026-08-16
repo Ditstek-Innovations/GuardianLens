@@ -24,6 +24,7 @@ const makeEventDetail = (): EventDetail => ({
     human_readable: 'Helmet required in Bay 3',
     debounce_seconds: 30,
     dwell_seconds: null,
+    detection_class: 'person_without_helmet',
   },
 });
 

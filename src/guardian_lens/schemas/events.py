@@ -103,6 +103,39 @@ class QueueResponse(BaseModel):
     next_cursor: str | None
 
 
+class DecisionReviewer(BaseModel):
+    id: UUID
+    full_name: str
+
+
+class IncidentGroup(BaseModel):
+    """One ongoing condition, shown as one queue row.
+
+    Display grouping ONLY: `event_ids` are the members, each of which is
+    decided individually through the normal single-event decision route —
+    there is no incident-level decision anywhere (BR-V-02)."""
+
+    incident_key: UUID  # id of the oldest member; stable while it exists
+    camera: QueueCamera
+    zone: QueueZone
+    rule: QueueRule
+    count: int
+    first_occurred_at: datetime
+    last_occurred_at: datetime
+    max_confidence: float | None
+    status: str
+    event_ids: list[UUID]
+
+
+class IncidentQueueResponse(BaseModel):
+    incidents: list[IncidentGroup]
+    queue_depth: int
+    gap_seconds: int
+    # True when the grouping scan hit its row cap: counts may be partial.
+    # Surfaced, never silent.
+    capped: bool
+
+
 class EventDetail(BaseModel):
     id: UUID
     event_id: UUID
@@ -122,6 +155,10 @@ class EventDetail(BaseModel):
     evidence_state: str
     decision_type: str | None
     rejection_reason: str | None
+    # BR-005 — a decided event carries its reviewer and timestamp; both are
+    # None exactly while status is 'unverified'.
+    reviewer: DecisionReviewer | None
+    decided_at: datetime | None
     version: int
 
 
@@ -142,11 +179,6 @@ class DecisionRequest(BaseModel):
     version: int = Field(ge=1)
     rejection_reason: str | None = Field(default=None, max_length=2000)
     corrections: list[CorrectionItem] | None = None
-
-
-class DecisionReviewer(BaseModel):
-    id: UUID
-    full_name: str
 
 
 class DecisionResponse(BaseModel):

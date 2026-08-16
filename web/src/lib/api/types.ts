@@ -74,9 +74,40 @@ export interface QueuePage {
   next_cursor: string | null;
 }
 
+/**
+ * One ongoing condition shown as one queue row. Display grouping ONLY:
+ * `event_ids` are the members, each decided individually — there is no
+ * incident-level decision anywhere (BR-V-02).
+ */
+export interface IncidentGroup {
+  incident_key: string;
+  camera: { id: string; name: string };
+  zone: { id: string | null; name: string | null };
+  rule: { human_readable: string | null };
+  count: number;
+  first_occurred_at: string;
+  last_occurred_at: string;
+  max_confidence: number | null;
+  status: string;
+  event_ids: string[];
+}
+
+export interface IncidentQueueResponse {
+  incidents: IncidentGroup[];
+  queue_depth: number;
+  gap_seconds: number;
+  /** True when the grouping scan hit its row cap — counts may be partial. */
+  capped: boolean;
+}
+
 export interface EventDetail extends QueueEventItem {
   /** ASSUMPTION A-3 — receipt time on the detail response (ADR-007 delay display). */
   received_at?: string;
+  /** BR-005 — present exactly when the event is decided; null while unverified. */
+  reviewer?: { id: string; full_name: string } | null;
+  decided_at?: string | null;
+  decision_type?: 'accept' | 'reject' | 'correct' | null;
+  rejection_reason?: string | null;
   /** The rule exactly as it stood when the event fired — frozen at ingest,
    * independent of any later edit to the live rule row. */
   rule_snapshot: {
@@ -85,6 +116,7 @@ export interface EventDetail extends QueueEventItem {
     confidence_threshold: number;
     debounce_seconds: number;
     dwell_seconds: number | null;
+    detection_class: string;
   };
 }
 
@@ -187,6 +219,8 @@ export interface RuleSummary {
   dwell_seconds: number | null;
   written_rule_reference: string | null;
   human_readable: string;
+  /** The model-output class this rule watches for, e.g. "person_without_helmet". */
+  detection_class: string;
   /** ASSUMPTION A-8 — who activated the rule (BR-C-02); TRD §9.4 defines created_by only. */
   activated_by?: { id: string; full_name: string } | null;
 }

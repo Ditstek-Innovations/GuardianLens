@@ -20,7 +20,7 @@ from __future__ import annotations
 import base64
 import binascii
 from collections.abc import Iterable, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -34,10 +34,11 @@ from guardian_lens.repositories.tables import (
     detection_rules,
     event_corrections,
     events,
+    users,
     zones,
 )
 
-__all__ = ["EventRepository", "encode_cursor", "decode_cursor"]
+__all__ = ["EventRepository", "encode_cursor", "decode_cursor", "sessionize"]
 
 
 def encode_cursor(received_at: datetime, event_id: UUID) -> str:
@@ -52,6 +53,31 @@ def decode_cursor(cursor: str) -> tuple[datetime, UUID]:
         return datetime.fromisoformat(ts), UUID(ident)
     except (ValueError, binascii.Error) as exc:
         raise MalformedRequestError("invalid cursor") from exc
+
+
+def sessionize(rows: Sequence[sa.Row], gap_seconds: int) -> list[list[sa.Row]]:
+    """Group rows into incidents: same rule, consecutive, gap ≤ window.
+
+    Display-level only — every candidate in a group is still decided
+    individually (BR-V-02 forbids bulk disposition; grouping collapses the
+    QUEUE VIEW, never the decisions). Rows must arrive ordered by
+    (rule_id, occurred_at). A row with no rule (an NVR event) never groups:
+    "the same condition is continuing" is a claim only a rule can back.
+    """
+    gap = timedelta(seconds=gap_seconds)
+    groups: list[list[sa.Row]] = []
+    for row in rows:
+        current = groups[-1] if groups else None
+        if (
+            current is not None
+            and row.rule_id is not None
+            and current[-1].rule_id == row.rule_id
+            and row.occurred_at - current[-1].occurred_at <= gap
+        ):
+            current.append(row)
+        else:
+            groups.append([row])
+    return groups
 
 
 class EventRepository:
@@ -167,6 +193,69 @@ class EventRepository:
         ).scalar_one()
         return rows, next_cursor, int(depth)
 
+    def incident_rows(
+        self,
+        *,
+        site_ids: Iterable[UUID],
+        status: str,
+        max_rows: int,
+        site_id: UUID | None = None,
+    ) -> tuple[Sequence[sa.Row], int, bool]:
+        """Every queue row for sessionization, ordered (rule_id, occurred_at).
+
+        Returns (rows, queue_depth, capped). ``capped`` is True when the
+        scan stopped at ``max_rows`` — the caller must surface it, never
+        present a truncated grouping as complete (no silent caps).
+        """
+        conditions = [
+            events.c.site_id.in_(list(site_ids)),
+            events.c.status == status,
+        ]
+        if site_id is not None:
+            conditions.append(events.c.site_id == site_id)
+
+        rows = self._session.execute(
+            sa.select(
+                events.c.id,
+                events.c.rule_id,
+                events.c.camera_id,
+                cameras.c.name.label("camera_name"),
+                events.c.zone_id,
+                zones.c.name.label("zone_name"),
+                detection_rules.c.human_readable.label("rule_human_readable"),
+                events.c.rule_snapshot,
+                events.c.confidence,
+                events.c.occurred_at,
+                events.c.received_at,
+                events.c.status,
+                events.c.evidence_state,
+                events.c.version,
+            )
+            .select_from(
+                events.join(cameras, events.c.camera_id == cameras.c.id)
+                .outerjoin(zones, events.c.zone_id == zones.c.id)
+                .outerjoin(
+                    detection_rules, events.c.rule_id == detection_rules.c.id
+                )
+            )
+            .where(*conditions)
+            # NULL rules last so ungroupable rows cannot split a session.
+            .order_by(
+                events.c.rule_id.asc().nulls_last(),
+                events.c.occurred_at.asc(),
+                events.c.id.asc(),
+            )
+            .limit(max_rows + 1)
+        ).all()
+
+        capped = len(rows) > max_rows
+        if capped:
+            rows = rows[:max_rows]
+        depth = self._session.execute(
+            sa.select(sa.func.count()).select_from(events).where(*conditions)
+        ).scalar_one()
+        return rows, int(depth), capped
+
     def get_scoped(self, event_pk: UUID, site_ids: Iterable[UUID]) -> sa.Row | None:
         """One event, only if it lies inside the caller's site scope.
         Out-of-scope and non-existent are indistinguishable to the caller.
@@ -180,6 +269,9 @@ class EventRepository:
                 cameras.c.name.label("camera_name"),
                 zones.c.name.label("zone_name"),
                 detection_rules.c.human_readable.label("rule_human_readable"),
+                # BR-005 made visible: the reviewer NAME travels with the
+                # decided event, not just the id.
+                users.c.full_name.label("reviewer_full_name"),
             )
             .select_from(
                 events.join(cameras, events.c.camera_id == cameras.c.id)
@@ -187,6 +279,7 @@ class EventRepository:
                 .outerjoin(
                     detection_rules, events.c.rule_id == detection_rules.c.id
                 )
+                .outerjoin(users, events.c.reviewer_id == users.c.id)
             )
             .where(
                 events.c.id == event_pk,

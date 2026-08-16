@@ -3,4 +3,5 @@ export const queueKeys = {
   all: ['queue'] as const,
   lists: () => [...queueKeys.all, 'list'] as const,
   list: (status: string) => [...queueKeys.lists(), status] as const,
+  incidents: (status: string) => [...queueKeys.all, 'incidents', status] as const,
 };

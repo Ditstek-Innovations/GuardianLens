@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { StatusChip } from '@/components/StatusChip';
 import { PageHeading } from '@/components/layout/PageHeading';
@@ -133,17 +133,38 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
 
   const queueItems = queueQuery.data === undefined ? [] : flattenQueueItems(queueQuery.data.pages);
   const currentIndex = queueItems.findIndex((item) => item.id === eventId);
+  // Opened from an incident group: walk that incident's members in order,
+  // one decision each (BR-V-02 — grouping never changes how many acts a
+  // disposition takes, only what the queue LIST shows).
+  const location = useLocation();
+  const incidentEventIds =
+    (location.state as { incidentEventIds?: string[] } | null)?.incidentEventIds ?? null;
+  const incidentIndex = incidentEventIds?.indexOf(eventId) ?? -1;
+  const nextInIncident =
+    incidentEventIds !== null && incidentIndex >= 0
+      ? (incidentEventIds[incidentIndex + 1] ?? null)
+      : null;
   const nextEventId =
+    nextInIncident ??
     (currentIndex >= 0
       ? queueItems[currentIndex + 1]?.id
-      : queueItems.find((item) => item.id !== eventId)?.id) ?? null;
+      : queueItems.find((item) => item.id !== eventId)?.id) ??
+    null;
 
   // PRD P-02 — median review time is a survival metric: on success the UI
   // advances to the next queue item automatically.
   const goToNext = useCallback(() => {
-    if (nextEventId !== null) navigate(ROUTES.queueEvent(nextEventId), { replace: true });
-    else navigate(ROUTES.queue);
-  }, [navigate, nextEventId]);
+    if (nextEventId !== null) {
+      navigate(ROUTES.queueEvent(nextEventId), {
+        replace: true,
+        // Carry the incident walk forward only while it has members left.
+        state:
+          nextInIncident !== null && incidentEventIds !== null
+            ? { incidentEventIds }
+            : undefined,
+      });
+    } else navigate(ROUTES.queue);
+  }, [navigate, nextEventId, nextInIncident, incidentEventIds]);
 
   // F-2/F-3 — after showing who already decided, move on automatically.
   useEffect(() => {
@@ -276,15 +297,43 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
 
   let decisionArea: ReactNode;
   if (isDecided) {
-    // CS-B-07 — no edit affordance on a decided event.
+    // CS-B-07 — no edit affordance on a decided event. BR-005 — the
+    // decision is shown WITH its reviewer, type and timestamp.
+    const DECISION_LABEL: Record<string, string> = {
+      accept: 'Accepted',
+      reject: 'Rejected',
+      correct: 'Corrected',
+    };
+    const decisionLabel = DECISION_LABEL[event.decision_type ?? ''] ?? event.status;
     decisionArea = (
-      <p className="flex items-start gap-2 rounded-control border border-border bg-surface-2 px-3 py-2.5 text-sm text-fg-muted">
-        <InfoIcon />
-        <span>
-          This candidate has been decided. Decisions are immutable (BR-V-01); a reviewer error is
-          addressed by a new correcting record, never by editing this one.
-        </span>
-      </p>
+      <div className="space-y-3 rounded-card border border-border bg-surface-1 p-4 shadow-ambient">
+        <h3 className="text-sm font-semibold text-fg">Decision</h3>
+        <dl className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-3">
+          <Detail label="Outcome" value={decisionLabel} />
+          <Detail
+            label="Decided by"
+            value={event.reviewer?.full_name ?? '—'}
+          />
+          <Detail
+            label="Decided at (site time)"
+            value={
+              event.decided_at != null
+                ? formatTimestamp(event.decided_at, event.site_timezone)
+                : '—'
+            }
+          />
+          {event.rejection_reason != null ? (
+            <Detail wide label="Rejection reason" value={event.rejection_reason} />
+          ) : null}
+        </dl>
+        <p className="flex items-start gap-2 text-xs text-fg-muted">
+          <InfoIcon />
+          <span>
+            Decisions are immutable (BR-V-01); a reviewer error is addressed by a new correcting
+            record, never by editing this one.
+          </span>
+        </p>
+      </div>
     );
   } else if (!canDecide) {
     decisionArea = (

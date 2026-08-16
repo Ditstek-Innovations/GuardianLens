@@ -414,6 +414,7 @@ class ConfigRepository:
                     "debounce_seconds": r.debounce_seconds,
                     "dwell_seconds": r.dwell_seconds,
                     "human_readable": r.human_readable,
+                    "detection_class": r.detection_class,
                 }
                 for r in rule_rows
             ],

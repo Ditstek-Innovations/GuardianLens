@@ -15,6 +15,8 @@ export interface CreateRuleInput {
   readonly dwellSeconds: number | null;
   readonly humanReadable: string;
   readonly writtenRuleReference: string | null;
+  /** The model-output class this rule watches for, e.g. "person_without_helmet". */
+  readonly detectionClass: string;
 }
 
 /**
@@ -34,6 +36,7 @@ export const useCreateRule = () => {
         dwell_seconds: input.dwellSeconds,
         human_readable: input.humanReadable,
         written_rule_reference: input.writtenRuleReference,
+        detection_class: input.detectionClass,
       }),
     onSettled: () => {
       // CS-D-05 — invalidate precisely.

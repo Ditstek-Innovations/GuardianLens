@@ -23,11 +23,14 @@ from guardian_lens.api.dependencies.tenant import get_tenant_context
 from guardian_lens.api.routes.ingest import raw_json_body
 from guardian_lens.core.errors import NotFoundError
 from guardian_lens.core.principal import HumanPrincipal
-from guardian_lens.repositories.events import EventRepository
+from guardian_lens.repositories.events import EventRepository, sessionize
 from guardian_lens.repositories.evidence import EvidenceStore
 from guardian_lens.schemas.events import (
     DecisionResponse,
+    DecisionReviewer,
     EventDetail,
+    IncidentGroup,
+    IncidentQueueResponse,
     QueueCamera,
     QueueItem,
     QueueResponse,
@@ -46,6 +49,7 @@ def _evidence_url(event_pk: UUID, evidence_state: str) -> str | None:
     if evidence_state != "present":
         return None
     return f"/api/v1/events/{event_pk}/evidence"
+
 
 
 @router.get("/events", response_model=QueueResponse)
@@ -103,6 +107,64 @@ def list_events(
     )
 
 
+#: Sessionization scan cap. Groups computed from more rows than this are
+#: cut off and reported capped=True — a partial grouping is surfaced as
+#: partial, never presented as the whole queue.
+_INCIDENT_SCAN_MAX_ROWS = 1000
+
+
+@router.get("/events/incidents", response_model=IncidentQueueResponse)
+def list_incidents(
+    principal: HumanPrincipal = Depends(require_queue_read),
+    context: TenantContext = Depends(get_tenant_context),
+    status: str = Query(default="unverified"),
+    site_id: UUID | None = Query(default=None),
+    gap_seconds: int = Query(default=300, ge=30, le=86400),
+) -> IncidentQueueResponse:
+    """The queue, grouped: consecutive candidates of one rule within
+    ``gap_seconds`` fold into one incident row. Display grouping only —
+    each member is decided individually via POST /events/{id}/decision;
+    no incident-level decision exists (BR-V-02)."""
+    rows, depth, capped = EventRepository(context.session).incident_rows(
+        site_ids=principal.site_ids(),
+        status=status,
+        max_rows=_INCIDENT_SCAN_MAX_ROWS,
+        site_id=site_id,
+    )
+    groups = sessionize(rows, gap_seconds)
+    # Oldest incident first — the same backlog discipline as the flat queue.
+    groups.sort(key=lambda g: (g[0].received_at, g[0].id))
+    return IncidentQueueResponse(
+        incidents=[
+            IncidentGroup(
+                incident_key=group[0].id,
+                camera=QueueCamera(
+                    id=group[0].camera_id, name=group[0].camera_name
+                ),
+                zone=QueueZone(id=group[0].zone_id, name=group[0].zone_name),
+                rule=QueueRule(
+                    human_readable=group[0].rule_human_readable
+                    or (group[0].rule_snapshot or {}).get("human_readable")
+                ),
+                count=len(group),
+                first_occurred_at=group[0].occurred_at,
+                last_occurred_at=group[-1].occurred_at,
+                max_confidence=max(
+                    (float(r.confidence) for r in group
+                     if r.confidence is not None),
+                    default=None,
+                ),
+                status=group[0].status,
+                event_ids=[r.id for r in group],
+            )
+            for group in groups
+        ],
+        queue_depth=depth,
+        gap_seconds=gap_seconds,
+        capped=capped,
+    )
+
+
 @router.get("/events/{event_pk}", response_model=EventDetail)
 def get_event(
     event_pk: UUID,
@@ -138,6 +200,12 @@ def get_event(
         evidence_state=row.evidence_state,
         decision_type=row.decision_type,
         rejection_reason=row.rejection_reason,
+        reviewer=(
+            DecisionReviewer(id=row.reviewer_id, full_name=row.reviewer_full_name)
+            if row.reviewer_id is not None
+            else None
+        ),
+        decided_at=row.decided_at,
         version=row.version,
     )
 

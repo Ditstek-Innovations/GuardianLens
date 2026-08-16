@@ -28,4 +28,6 @@ export {
   TableHeadCell,
   TableRow,
 } from './Table';
+export { Checkbox } from './Checkbox';
 export { Textarea } from './Textarea';
+export { Toggle } from './Toggle';

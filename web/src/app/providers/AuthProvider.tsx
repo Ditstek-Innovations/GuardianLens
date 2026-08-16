@@ -48,17 +48,25 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     [],
   );
 
-  const signIn = useCallback(async (email: string, password: string): Promise<void> => {
-    const response = await apiClient.post<LoginResponse>('/api/v1/auth/login', {
-      email,
-      password,
-    });
-    tokenStore.set({
-      accessToken: response.access_token,
-      refreshToken: response.refresh_token,
-    });
-    setPrincipal(toPrincipal(response));
-  }, []);
+  const signIn = useCallback(
+    async (email: string, password: string, remember: boolean): Promise<void> => {
+      const response = await apiClient.post<LoginResponse>('/api/v1/auth/login', {
+        email,
+        password,
+      });
+      // CS-AU-19 — where the refresh credential persists is the user's
+      // explicit choice, made here and kept across rotations.
+      tokenStore.set(
+        {
+          accessToken: response.access_token,
+          refreshToken: response.refresh_token,
+        },
+        { remember },
+      );
+      setPrincipal(toPrincipal(response));
+    },
+    [],
+  );
 
   const signOut = useCallback((): void => {
     // Best-effort server-side refresh-token revocation (TRD §10.2 logout).

@@ -3,7 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 
-import { Button, FormField, Input, PasswordInput } from '@/components/ui';
+import { Button, Checkbox, FormField, Input, PasswordInput } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
 import { useAuth } from '@/hooks/useAuth';
 import { ApiError } from '@/lib/api/errors';
@@ -34,6 +34,8 @@ export const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [failure, setFailure] = useState<FailureKind>(null);
+  // CS-AU-19 — device persistence is opt-in, per sign-in, default off.
+  const [remember, setRemember] = useState(false);
   const errorRef = useRef<HTMLParagraphElement>(null);
   // CS-AU-13 / CS-FM-01/02 — schema resolver; validate on submit, then
   // re-validate on change after the first failure. RHF focuses the first
@@ -53,7 +55,7 @@ export const LoginPage = () => {
   const onValid = async (values: LoginValues): Promise<void> => {
     setFailure(null);
     try {
-      await signIn(values.email, values.password);
+      await signIn(values.email, values.password, remember);
       navigate(safeRedirect((location.state as { from?: unknown } | null)?.from), {
         replace: true,
       });
@@ -90,6 +92,14 @@ export const LoginPage = () => {
         <FormField label="Password" required error={formState.errors.password?.message}>
           <PasswordInput autoComplete="current-password" {...register('password')} />
         </FormField>
+
+        {/* CS-AU-19 — opt-in device persistence; honest about the bound. */}
+        <Checkbox
+          label="Keep me signed in"
+          hint="Stays signed in on this device for up to 7 days. Leave off on a shared computer."
+          checked={remember}
+          onChange={(event) => setRemember(event.target.checked)}
+        />
 
         {/* CS-AU-03 — Button defaults to type="button"; submit is explicit.
             CS-AU-06 / CS-FM-05 — disabled only while the request is in flight. */}

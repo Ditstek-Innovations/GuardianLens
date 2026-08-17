@@ -85,26 +85,76 @@ def ensure_configuration(client: httpx.Client, token: str) -> tuple[str, str]:
         print(f"  zone created: {zone_id}")
 
     ritems = _items(client.get(
-        "/api/v1/rules", headers=auth, params={"zone_id": zone_id}
+        '/api/v1/rules', headers=auth, params={'zone_id': zone_id}
     ).json())
-    active = [r for r in ritems if r.get("is_active")]
-    if not active:
-        rule = next(iter(ritems), None)
-        if rule is None:
-            rule = client.post(
-                "/api/v1/rules", headers=auth,
-                json={"zone_id": zone_id, "rule_type": "ppe_helmet",
-                      "confidence_threshold": 0.5, "debounce_seconds": 30,
-                      "human_readable": "Helmet required in Bay 3",
-                      "written_rule_reference": "Site safety manual 4.2"},
+    active_types = {r['rule_type'] for r in ritems if r.get('is_active')}
+
+    # ── Rule 1: PPE helmet (detection_class must match the hardhat model) ─
+    if 'ppe_helmet' not in active_types:
+        ppe_rule = next(
+            (r for r in ritems if r['rule_type'] == 'ppe_helmet'), None
+        )
+        if ppe_rule is None:
+            ppe_rule = client.post(
+                '/api/v1/rules', headers=auth,
+                json={
+                    'zone_id': zone_id,
+                    'rule_type': 'ppe_helmet',
+                    'confidence_threshold': 0.5,
+                    'debounce_seconds': 30,
+                    # detection_class MUST match a class the loaded model emits.
+                    # The hardhat model (Docs/MODEL_INTEGRATION.md) names it
+                    # exactly 'person_without_helmet'; the COCO model does not
+                    # have this class — only load this rule with the hardhat
+                    # model. With the COCO model below, use 'bottle' instead.
+                    'detection_class': 'person_without_helmet',
+                    'must_be_carried': False,
+                    'human_readable': 'Helmet required in Bay 3',
+                    'written_rule_reference': 'Site safety manual 4.2',
+                },
             ).json()
-            print(f"  rule created: {rule['id']}")
+            print(f"  PPE rule created: {ppe_rule['id']}")
         activated = client.post(
-            f"/api/v1/rules/{rule['id']}/activate", headers=auth
+            f"/api/v1/rules/{ppe_rule['id']}/activate", headers=auth
         ).json()
-        print(f"  rule activated by {activated['activated_by']['full_name']}"
-              if isinstance(activated.get("activated_by"), dict)
-              else "  rule activated")
+        name = activated.get('activated_by') or {}
+        print(f"  PPE rule activated by {name.get('full_name', '(system)')}")
+
+    # ── Rule 2: bottle in hand — uses the COCO model's 'bottle' class ────
+    # The key insight: 'person_with_bottle' is NOT a real class in any model.
+    # COCO outputs 'bottle'. must_be_carried=True makes the rule fire only
+    # when the bottle's bbox centre sits INSIDE a person bbox, i.e. it is
+    # held — not lying on a table or floor. This is the correct detection_class
+    # for a COCO-based OnnxDetector or SyntheticDetector.
+    if 'found_bottle' not in active_types:
+        bottle_rule = next(
+            (r for r in ritems if r['rule_type'] == 'found_bottle'), None
+        )
+        if bottle_rule is None:
+            bottle_rule = client.post(
+                '/api/v1/rules', headers=auth,
+                json={
+                    'zone_id': zone_id,
+                    'rule_type': 'found_bottle',
+                    # ← FIXED: was 'person_with_bottle' which is not a COCO
+                    # class name. The COCO model emits 'bottle' (class id 39).
+                    'detection_class': 'bottle',
+                    # must_be_carried=False: fire on any bottle detected in
+                    # the zone — no person context needed.
+                    'must_be_carried': False,
+                    'confidence_threshold': 0.5,
+                    'debounce_seconds': 30,
+                    'human_readable': 'Found Bottle — bottle needs to be detected',
+                    'written_rule_reference': None,
+                },
+            ).json()
+            print(f"  Bottle rule created: {bottle_rule['id']}")
+        activated = client.post(
+            f"/api/v1/rules/{bottle_rule['id']}/activate", headers=auth
+        ).json()
+        name = activated.get('activated_by') or {}
+        print(f"  Bottle rule activated by {name.get('full_name', '(system)')}")
+
     return site_id, camera_id
 
 
@@ -133,10 +183,39 @@ def ensure_agent_and_model(site_id: str) -> tuple[str, str]:
                 (agent_id, site_id, PasswordHasher().hash(secret)),
             )
             print(f"  agent registered: {agent_id}")
+        # synthetic model — used by SyntheticDetector in this script.
         conn.execute(
             "INSERT INTO model_versions (version, artefact_hash, classes) "
             "VALUES ('synthetic-0.0.0', 'sha256:synthetic', "
-            "'[\"person_without_helmet\"]') ON CONFLICT (version) DO NOTHING"
+            "'[\"person_without_helmet\", \"bottle\", \"person\"]')"
+            " ON CONFLICT (version) DO NOTHING"
+        )
+        # COCO model — used by OnnxDetector in RTSP mode
+        # (var/models/yolov8n-coco.onnx + yolov8n-coco.manifest.json).
+        # Without this row, every real-model event is rejected at ingest
+        # with 400 "model_version is not a registered model version".
+        import json as _json
+        coco_classes = [
+            "person", "bicycle", "car", "motorcycle", "airplane", "bus",
+            "train", "truck", "boat", "traffic light", "fire hydrant",
+            "stop sign", "parking meter", "bench", "bird", "cat", "dog",
+            "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe",
+            "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+            "skis", "snowboard", "sports ball", "kite", "baseball bat",
+            "baseball glove", "skateboard", "surfboard", "tennis racket",
+            "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl",
+            "banana", "apple", "sandwich", "orange", "broccoli", "carrot",
+            "hot dog", "pizza", "donut", "cake", "chair", "couch",
+            "potted plant", "bed", "dining table", "toilet", "tv", "laptop",
+            "mouse", "remote", "keyboard", "cell phone", "microwave", "oven",
+            "toaster", "sink", "refrigerator", "book", "clock", "vase",
+            "scissors", "teddy bear", "hair drier", "toothbrush",
+        ]
+        conn.execute(
+            "INSERT INTO model_versions (version, artefact_hash, classes) "
+            "VALUES ('yolov8n-coco-0.1.0-dev', 'sha256:coco-dev', %s)"
+            " ON CONFLICT (version) DO NOTHING",
+            (_json.dumps(coco_classes),),
         )
         conn.commit()
     return agent_id, secret
@@ -159,11 +238,24 @@ def run_edge(api: str, camera_id: str, site_id: str,
     tmp = Path(tempfile.mkdtemp(prefix="gl-edge-demo-"))
     now = datetime.now(timezone.utc)
     scenario = Scenario.from_list([
+        # Frame 0: PPE violation — fires the ppe_helmet rule.
         {"at_seconds": 0.0, "camera_id": camera_id,
-         "detections": [{"class": "person_without_helmet",
-                         "bbox": [0.4, 0.4, 0.6, 0.85],
-                         "confidence": 0.83}]},
-        {"at_seconds": 1.0, "camera_id": camera_id, "detections": []},
+         "detections": [
+             {"class": "person_without_helmet",
+              "bbox": [0.4, 0.4, 0.6, 0.85], "confidence": 0.83},
+         ]},
+        # Frame 1: bottle held by a person — fires the found_bottle rule.
+        # Both detections must be present: a 'person' bbox containing the
+        # 'bottle' bbox centre so must_be_carried geometry passes.
+        # 'person_with_bottle' is NOT a class; the model emits 'bottle'.
+        {"at_seconds": 1.0, "camera_id": camera_id,
+         "detections": [
+             {"class": "person",
+              "bbox": [0.2, 0.1, 0.8, 0.95], "confidence": 0.91},
+             {"class": "bottle",
+              "bbox": [0.4, 0.4, 0.6, 0.75], "confidence": 0.78},
+         ]},
+        {"at_seconds": 2.0, "camera_id": camera_id, "detections": []},
     ])
 
     client = httpx.Client(base_url=api, timeout=10.0)

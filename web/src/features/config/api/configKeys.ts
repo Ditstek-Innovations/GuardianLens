@@ -7,4 +7,6 @@ export const configKeys = {
   rules: () => [...configKeys.all, 'rules'] as const,
   agents: () => [...configKeys.all, 'agents'] as const,
   models: () => [...configKeys.all, 'models'] as const,
+  /** Deduplicated class-name list derived from all model versions. */
+  modelClasses: () => [...configKeys.all, 'model-classes'] as const,
 };

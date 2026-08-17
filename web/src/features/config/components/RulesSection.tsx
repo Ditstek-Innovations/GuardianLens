@@ -1,11 +1,11 @@
 import { useState } from 'react';
 
-import { Button, Checkbox, Chip, ChipIcon, FormField, Input, Select } from '@/components/ui';
+import { Button, Checkbox, Chip, ChipIcon, Combobox, FormField, Input, Select } from '@/components/ui';
 import { MESSAGES } from '@/constants/messages';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
 
-import { useRulesQuery, useZonesQuery } from '../api/useConfigQueries';
+import { useRulesQuery, useZonesQuery, useModelClassesQuery } from '../api/useConfigQueries';
 import { useCreateRule } from '../api/useCreateRule';
 import { useSetRuleActive } from '../api/useSetRuleActive';
 import { ConfigSection } from './ConfigSection';
@@ -20,30 +20,75 @@ import type { RuleSummary } from '@/lib/api/types';
  * typo cannot silently create a rule no evaluator understands.
  */
 const RULE_TYPE_OPTIONS = [
-  { value: 'ppe_helmet', label: 'PPE — helmet required' },
+  {
+    value: 'ppe_helmet',
+    label: 'PPE — helmet required',
+    defaultDetectionClass: 'person_without_helmet',
+    defaultRuleText: 'Helmet required',
+    defaultMustBeCarried: false,
+  },
+  {
+    value: 'found_bottle',
+    label: 'Found Bottle',
+    defaultDetectionClass: 'bottle',
+    defaultRuleText: 'Found Bottle',
+    defaultMustBeCarried: false,
+  },
+  {
+    value: 'mobile_phone',
+    label: 'Mobile phone use',
+    defaultDetectionClass: 'cell phone',
+    defaultRuleText: 'Mobile phone use',
+    defaultMustBeCarried: true,
+  },
+  {
+    value: 'zone_entry',
+    label: 'Zone entry / intrusion detection',
+    defaultDetectionClass: 'person',
+    defaultRuleText: 'Intrusion detected',
+    defaultMustBeCarried: false,
+  },
 ] as const;
 
 export const RulesSection = () => {
   const { principal } = useAuth();
   const rulesQuery = useRulesQuery();
   const zonesQuery = useZonesQuery();
+  const modelClassesQuery = useModelClassesQuery();
   const createRule = useCreateRule();
   const setRuleActive = useSetRuleActive();
   const { showToast } = useToast();
   const [pendingRule, setPendingRule] = useState<RuleSummary | null>(null);
-  const [ruleName, setRuleName] = useState('');
+  const [ruleName, setRuleName] = useState<string>(RULE_TYPE_OPTIONS[0].defaultRuleText);
   const [zoneId, setZoneId] = useState('');
   const [ruleType, setRuleType] = useState<string>(RULE_TYPE_OPTIONS[0].value);
   const [threshold, setThreshold] = useState('0.5');
   const [debounce, setDebounce] = useState('30');
   const [dwell, setDwell] = useState('');
   const [writtenRef, setWrittenRef] = useState('');
-  const [detectionClass, setDetectionClass] = useState('person_without_helmet');
-  const [mustBeCarried, setMustBeCarried] = useState(false);
+  const [detectionClass, setDetectionClass] = useState<string>(RULE_TYPE_OPTIONS[0].defaultDetectionClass);
+  const [mustBeCarried, setMustBeCarried] = useState<boolean>(RULE_TYPE_OPTIONS[0].defaultMustBeCarried);
   const [formError, setFormError] = useState<string | null>(null);
 
   const zones = zonesQuery.data ?? [];
   const effectiveZoneId = zoneId !== '' ? zoneId : (zones[0]?.id ?? '');
+  const modelClasses = modelClassesQuery.data ?? [];
+
+  const handleRuleTypeChange = (newType: string) => {
+    setRuleType(newType);
+    const config = RULE_TYPE_OPTIONS.find((opt) => opt.value === newType);
+    if (config) {
+      setDetectionClass(config.defaultDetectionClass);
+      setMustBeCarried(config.defaultMustBeCarried);
+      
+      const isCurrentTextDefault = RULE_TYPE_OPTIONS.some(
+        (opt) => opt.defaultRuleText === ruleName || ruleName === '',
+      );
+      if (isCurrentTextDefault) {
+        setRuleName(config.defaultRuleText);
+      }
+    }
+  };
 
   const handleCreate = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -90,7 +135,8 @@ export const RulesSection = () => {
       },
       {
         onSuccess: () => {
-          setRuleName('');
+          const currentConfig = RULE_TYPE_OPTIONS.find((opt) => opt.value === ruleType);
+          setRuleName(currentConfig?.defaultRuleText ?? '');
           setWrittenRef('');
           setDwell('');
           showToast({ tone: 'success', message: MESSAGES.config.ruleCreated });
@@ -160,7 +206,7 @@ export const RulesSection = () => {
         </Select>
       </FormField>
       <FormField label="Type" required className="lg:col-span-3">
-        <Select value={ruleType} onChange={(event) => setRuleType(event.target.value)}>
+        <Select value={ruleType} onChange={(event) => handleRuleTypeChange(event.target.value)}>
           {RULE_TYPE_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -171,12 +217,18 @@ export const RulesSection = () => {
       <FormField
         label="Detection class"
         required
-        hint="The model-output class this rule watches for, e.g. person_without_helmet, backpack. Must match a class the approved model actually emits."
+        hint={
+          modelClasses.length > 0
+            ? `Choose from the ${modelClasses.length} classes your model emits, or type a custom value.`
+            : 'The model-output class this rule watches for. Must match a class the approved model emits.'
+        }
         className="lg:col-span-4"
       >
-        <Input
+        <Combobox
           value={detectionClass}
-          onChange={(event) => setDetectionClass(event.target.value)}
+          onChange={setDetectionClass}
+          options={modelClasses}
+          placeholder={modelClasses[0] ?? 'e.g. bottle, cell phone, person…'}
         />
       </FormField>
       <FormField

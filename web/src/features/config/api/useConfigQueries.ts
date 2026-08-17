@@ -8,6 +8,7 @@ import { configKeys } from './configKeys';
 import type {
   CameraSummary,
   ListResponse,
+  ModelVersionSummary,
   RuleSummary,
   Site,
   ZoneSummary,
@@ -51,4 +52,26 @@ export const useRulesQuery = () =>
       unwrapItems(
         await apiClient.get<ListResponse<RuleSummary> | RuleSummary[]>('/api/v1/rules', { signal }),
       ),
+  });
+
+/**
+ * Derives the live list of detectable class names from all registered model
+ * versions. Deduplicated and sorted so the rule form always reflects the
+ * current approved model manifest — no manual maintenance required.
+ */
+export const useModelClassesQuery = () =>
+  useQuery({
+    // Distinct key from configKeys.models() — both hit /api/v1/model-versions
+    // but return different shapes. Same key would cause a cache type collision.
+    queryKey: configKeys.modelClasses(),
+    queryFn: async ({ signal }) => {
+      const models = unwrapItems(
+        await apiClient.get<ListResponse<ModelVersionSummary> | ModelVersionSummary[]>(
+          '/api/v1/model-versions',
+          { signal },
+        ),
+      );
+      const allClasses = models.flatMap((m) => m.classes);
+      return [...new Set(allClasses)].sort();
+    },
   });

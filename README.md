@@ -6,11 +6,98 @@ Research cut-off 20 July 2026 · POC target 14 August 2026 · Team of five
 
 ---
 
-## Repository
+## Quick Start & Setup Guide
+
+### Prerequisites
+Before running the stack, ensure your system has the following installed:
+- **Python 3.11+**
+- **Node.js 18+** & **npm**
+- **Docker & Docker Compose** (for PostgreSQL 16 container, or a local PostgreSQL 16 instance)
+- **Make** & **Git**
+
+---
+
+### Step-by-Step Setup (Clone to Run)
+
+#### 1. Clone the repository
+```bash
+git clone <repo-url>
+cd GuardianLens
+```
+
+#### 2. Create and activate Python virtual environment
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+#### 3. Install Python dependencies
+Install core package along with development tools and camera decoding extras:
+```bash
+pip install -e ".[dev,edge-camera]"
+```
+
+#### 4. Configure Environment Variables
+Copy the example environment file:
+```bash
+cp .env.example .env
+```
+*(On the first run of `make run`, a cryptographic `GL_CAMERA_KEY` for AES-256-GCM stream sealing will automatically be generated and appended to `.env` if not present).*
+
+#### 5. Install Frontend Dependencies
+```bash
+cd web && npm install && cd ..
+```
+
+#### 6. Start the Whole Stack (One Command)
+```bash
+make run
+```
+
+This single command runs the production code path automatically:
+1. Starts PostgreSQL 16 in Docker (waits until healthy).
+2. Migrates the central Control database schema (`gl_control`).
+3. Provisions the sandbox tenant (`pilot`): creates database, runs tenant migrations, sets tenant identity singleton, seeds roles, and runs **FF-11 attestation**.
+4. Bootstraps the default admin account (`admin@guardianlens.local`).
+5. Launches the **Control Plane API on http://localhost:8000** and **Review UI on http://localhost:5173**.
+
+---
+
+### Simulating Live Events
+
+1. Open **http://localhost:5173** in your browser.
+2. Sign in with:
+   - **Email:** `admin@guardianlens.local`
+   - **Password:** `guardian-dev-1` (or custom `$GL_BOOTSTRAP_PASSWORD`)
+3. In a **second terminal** (with `.venv` active), feed events from a simulated site:
+   ```bash
+   make edge-demo
+   ```
+4. In the Review UI, open the **Review Queue**, press **A** to accept (or **R** to reject with reason, **C** to correct), and view verified records in **Reports**.
+
+---
+
+### Onboarding a Real Client / Tenant
+
+A production tenant has **zero demo data** and its own physically isolated database. To onboard a real client:
+
+```bash
+make onboard TENANT=<slug> ADMIN_EMAIL=<email> ADMIN_NAME='<Full Name>' SITE_NAME='<Plant Name>' TZ='<Timezone>'
+```
+
+For complete step-by-step instructions on hardware, cameras, zones, edge deployment, and stream honesty verification, refer to:
+👉 **[Docs/TENANT_ONBOARDING.md](Docs/TENANT_ONBOARDING.md)** and **[Docs/WORKFLOW.md](Docs/WORKFLOW.md)**.
+
+---
+
+## Repository Structure
 
 | Path | Contents | Normative source |
 |---|---|---|
 | [Docs/](Docs/) | The controlled document set — GOVERNANCE §19.1 | — |
+| [Docs/TENANT_ONBOARDING.md](Docs/TENANT_ONBOARDING.md) | Client onboarding SOP and technical runbook | [Docs/DATABASE.md](Docs/DATABASE.md) §13.5 |
+| [Docs/WORKFLOW.md](Docs/WORKFLOW.md) | End-to-end workflow narrative & command reference | [Docs/TRD.md](Docs/TRD.md) §20.2 |
+| [Docs/CAMERA_ONBOARDING.md](Docs/CAMERA_ONBOARDING.md) | Unbox-to-verified-record physical camera orientation | [Docs/PRD.md](Docs/PRD.md) |
 | [migrations/tenant/](migrations/tenant/) | Tenant schema, one database per tenant (ADR-016) | [Docs/DATABASE.md](Docs/DATABASE.md) §5, §6 |
 | [migrations/control/](migrations/control/) | Tenant registry and routing (ADR-017) | [Docs/DATABASE.md](Docs/DATABASE.md) §1.4 |
 | [src/guardian_lens/rules/](src/guardian_lens/rules/) | Rule-to-constraint registry | [Docs/RULE_BOOK.md](Docs/RULE_BOOK.md) §6 |
@@ -19,34 +106,25 @@ Research cut-off 20 July 2026 · POC target 14 August 2026 · Team of five
 
 **Where code and documents disagree, the documents prevail and the code is corrected.**
 
-This is TRD §20.2 steps 1–4 in development form: data layer, control plane
-API (`src/guardian_lens/`), review UI (`web/`) and the edge agent with a
-synthetic detector (`src/guardian_lens_edge/`). The real ONNX detector is
-gated on G1 and does not exist yet.
+---
 
-```bash
-make run          # ONE command: db + API (:8000) + review UI (:5173, or GL_WEB_PORT)
-make edge-demo    # second terminal: simulated site feeds the queue
-```
+## Command Reference
 
-Login `admin@guardianlens.local` / `guardian-dev-1`. Full command list,
-workflow narrative and gap register: **[Docs/WORKFLOW.md](Docs/WORKFLOW.md)**.
-
-Individual pieces: `make api` · `make web` · `make bypass` · `make e2e` ·
-`make test` — see `make help`.
-
-> Every SQL statement in `Docs/DATABASE.md` remains a **specification**. The
-> migrations are the executable form, and they are reviewed against it — a
-> document gets reviewed, a migration gets applied.
-
-### Tests
-
-| Suite | Asserts | Needs a database |
-|---|---|---|
-| `tests/bypass/` | Every ABSOLUTE rule is unviolable **via direct SQL** — TRD §19.4 | yes |
-| `tests/integration/` | Audit atomicity, concurrent decisions, clean instance, query plans, CLI | yes |
-| `tests/migrations/` | Every revision reverses and reapplies; provisioning lifecycle | yes |
-| `tests/unit/` | URL handling, registry invariants | no |
+| Command | Action |
+|---|---|
+| `make run` | ONE COMMAND: db + API (:8000) + review UI (:5173) |
+| `make edge-demo` | Feed the running stack events from a simulated site |
+| `make camera-sim` | Start synthetic RTSP camera (`rtsp://localhost:8554/cam1`) |
+| `make onboard` | Provision fresh tenant + bootstrap first admin (no demo data) |
+| `make api` | Control plane API only (uvicorn on :8000) |
+| `make web` | Review UI only (Vite on :5173) |
+| `make up` / `make down` | Start PostgreSQL container / stop stack and clean volumes |
+| `make attest TENANT=<slug>` | Run FF-11 constraint and trigger attestation |
+| `make bypass` | Run business-rule bypass test suite (TRD §19.4) |
+| `make e2e` | Run full end-to-end workflow test suite |
+| `make test` | Run complete automated test suite |
+| `make coverage` | Run test suite with line & branch coverage report |
+| `make lint` | Run bandit static security analysis |
 
 Markers separate the two rule states: `-m active_rule` is release-blocking,
 `-m proposed_rule` is informational until [RULE_BOOK.md](Docs/RULE_BOOK.md)

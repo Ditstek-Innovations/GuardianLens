@@ -256,6 +256,9 @@ class RTSPProbeService:
             except json.JSONDecodeError:
                 return None
 
+        except FileNotFoundError:
+            self.logger.error("CRITICAL: 'ffprobe' command not found! Camera discovery requires ffmpeg to be installed on the system.")
+            return None
         except Exception as e:
             self.logger.debug(f"ffprobe error for {rtsp_url}: {e}")
             return None

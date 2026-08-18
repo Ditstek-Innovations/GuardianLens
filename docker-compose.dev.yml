@@ -1,0 +1,59 @@
+# Development stack — TRD 13.2.
+#
+# Only `db` is present at this slice. TRD 20.2 builds in order:
+#   step 1  deploy database with full schema and constraints   <- here
+#   step 2  deploy control plane; run the bypass suite against it
+#   step 3  deploy the review UI; exercise the loop with stubbed events
+#   step 4  deploy the edge agent with a recorded video source
+#
+# The api / web / edge-agent / rtsp-sim services land with those slices.
+
+services:
+  db:
+    image: postgres:16
+    container_name: gl-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-guardian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-guardian}
+      # The control database is created by the image; tenant databases are
+      # created by the provisioning path (DATABASE.md 13.5.1), never by hand.
+      POSTGRES_DB: ${GL_CONTROL_DB_NAME:-gl_control}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-guardian}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Synthetic RTSP source — TRD 13.2. A recorded/synthetic stream stands in
+  # for a real camera: the MVP tests the workflow and MOD-1's reconnect
+  # behaviour, not the detector. Start with: docker compose --profile camera up
+  # Stream URL: rtsp://localhost:8554/cam1
+  rtsp-sim:
+    image: bluenviron/mediamtx:latest
+    container_name: gl-rtsp-sim
+    profiles: ["camera"]
+    ports:
+      - "8554:8554"
+  rtsp-feed:
+    image: linuxserver/ffmpeg:latest
+    container_name: gl-rtsp-feed
+    profiles: ["camera"]
+    depends_on:
+      - rtsp-sim
+    # A moving test pattern with a timestamp — enough to prove decode,
+    # sampling and reconnect. No footage of any person, per BR-P/BR-006
+    # discipline even in fixtures.
+    entrypoint: >
+      ffmpeg -re -f lavfi
+      -i testsrc2=size=640x360:rate=10
+      -vf "drawtext=text='gl-sim %{localtime}':fontcolor=white:box=1:boxcolor=black@0.5:x=8:y=8"
+      -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p
+      -f rtsp rtsp://rtsp-sim:8554/cam1
+    restart: unless-stopped
+
+volumes:
+  pgdata:

@@ -2,7 +2,7 @@
 name = "guardian-lens"
 version = "0.1.0"
 description = "AI safety layer for existing workplace cameras — schema and business-rule enforcement"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.13",
     "psycopg[binary]>=3.1",

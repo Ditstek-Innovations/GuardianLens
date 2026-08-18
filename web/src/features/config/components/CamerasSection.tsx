@@ -394,99 +394,99 @@ export const CamerasSection = () => {
 
   return (
     <>
-    <ConfigSection
-      title="Cameras"
-      description="Streams the edge agent watches. The credential is sealed on save and never shown or returned again."
-      query={camerasQuery}
-      emptyDetail="No cameras are registered."
-      actions={form}
-      actionLabel="Add camera"
-    >
-      {(cameras) => (
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-fg-muted">
-              <th scope="col" className="h-10 px-4">Name</th>
-              <th scope="col" className="h-10 px-4">Location</th>
-              <th scope="col" className="h-10 px-4">Profile</th>
-              <th scope="col" className="h-10 px-4">Sample rate</th>
-              <th scope="col" className="h-10 px-4">Stream</th>
-              <th scope="col" className="h-10 px-4">Credential</th>
-              <th scope="col" className="h-10 px-4">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {cameras.map((camera) => {
-              const presentation = statusPresentation(camera.status);
-              return (
-                <tr key={camera.id} className="h-10 transition-colors duration-120 hover:bg-surface-2">
-                  <td className="px-4 py-2 text-fg">{camera.name}</td>
-                  <td className="px-4 py-2 text-fg-muted">{camera.location_description ?? '—'}</td>
-                  <td className="px-4 py-2 text-fg-muted">
-                    {camera.stream_profile === 'primary' ? 'Primary (HD)' : 'Secondary (SD)'}
-                  </td>
-                  <td className="px-4 py-2 tabular-nums text-fg-muted">{camera.sample_rate_fps} fps</td>
-                  <td className="px-4 py-2">
-                    <Chip variant={presentation.variant} icon={<ChipIcon glyph={presentation.glyph} />}>
-                      {presentation.label}
-                    </Chip>
-                  </td>
-                  <td className="px-4 py-2">
-                    <Chip variant="neutral" icon={<ChipIcon glyph="lock" />}>
-                      Credential stored
-                    </Chip>
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => setReplaceTarget(camera)}
-                      >
-                        Replace credential
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => setStatusTarget(camera)}
-                      >
-                        {camera.status === 'disabled' ? 'Enable' : 'Disable'}
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </ConfigSection>
-    {pending !== null ? (
-      <RegisterCameraDialog
-        pending={pending}
-        isSubmitting={createCamera.isPending}
-        onConfirm={handleConfirm}
-        onCancel={() => setPending(null)}
-      />
-    ) : null}
-    {replaceTarget !== null ? (
-      <ReplaceCredentialDialog
-        camera={replaceTarget}
-        isSubmitting={updateCamera.isPending}
-        onConfirm={handleReplaceCredential}
-        onCancel={() => setReplaceTarget(null)}
-      />
-    ) : null}
-    {statusTarget !== null ? (
-      <CameraStatusDialog
-        camera={statusTarget}
-        isSubmitting={updateCamera.isPending}
-        onConfirm={handleStatusChange}
-        onCancel={() => setStatusTarget(null)}
-      />
-    ) : null}
+      <ConfigSection
+        title="Cameras"
+        description="Streams the edge agent watches. The credential is sealed on save and never shown or returned again."
+        query={camerasQuery}
+        emptyDetail="No cameras are registered."
+        actions={form}
+        actionLabel="Add camera"
+      >
+        {(cameras) => (
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-fg-muted">
+                <th scope="col" className="h-10 px-4">Name</th>
+                <th scope="col" className="h-10 px-4">Location</th>
+                <th scope="col" className="h-10 px-4">Profile</th>
+                <th scope="col" className="h-10 px-4">Sample rate</th>
+                <th scope="col" className="h-10 px-4">Stream</th>
+                <th scope="col" className="h-10 px-4">Credential</th>
+                <th scope="col" className="h-10 px-4">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {cameras.map((camera) => {
+                const presentation = statusPresentation(camera.status);
+                return (
+                  <tr key={camera.id} className="h-10 transition-colors duration-120 hover:bg-surface-2">
+                    <td className="px-4 py-2 text-fg">{camera.name}</td>
+                    <td className="px-4 py-2 text-fg-muted">{camera.location_description ?? '—'}</td>
+                    <td className="px-4 py-2 text-fg-muted">
+                      {camera.stream_profile === 'primary' ? 'Primary (HD)' : 'Secondary (SD)'}
+                    </td>
+                    <td className="px-4 py-2 tabular-nums text-fg-muted">{camera.sample_rate_fps} fps</td>
+                    <td className="px-4 py-2">
+                      <Chip variant={presentation.variant} icon={<ChipIcon glyph={presentation.glyph} />}>
+                        {presentation.label}
+                      </Chip>
+                    </td>
+                    <td className="px-4 py-2">
+                      <Chip variant="neutral" icon={<ChipIcon glyph="lock" />}>
+                        Credential stored
+                      </Chip>
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setReplaceTarget(camera)}
+                        >
+                          Replace credential
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setStatusTarget(camera)}
+                        >
+                          {camera.status === 'disabled' ? 'Enable' : 'Disable'}
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </ConfigSection>
+      {pending !== null ? (
+        <RegisterCameraDialog
+          pending={pending}
+          isSubmitting={createCamera.isPending}
+          onConfirm={handleConfirm}
+          onCancel={() => setPending(null)}
+        />
+      ) : null}
+      {replaceTarget !== null ? (
+        <ReplaceCredentialDialog
+          camera={replaceTarget}
+          isSubmitting={updateCamera.isPending}
+          onConfirm={handleReplaceCredential}
+          onCancel={() => setReplaceTarget(null)}
+        />
+      ) : null}
+      {statusTarget !== null ? (
+        <CameraStatusDialog
+          camera={statusTarget}
+          isSubmitting={updateCamera.isPending}
+          onConfirm={handleStatusChange}
+          onCancel={() => setStatusTarget(null)}
+        />
+      ) : null}
     </>
   );
 };

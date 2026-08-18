@@ -109,7 +109,7 @@ const execute = async (
   return response;
 };
 
-const requestJson = async <T>(path: string, request: InternalRequest): Promise<T> => {
+const requestJson = async < T > (path: string, request: InternalRequest): Promise<T> => {
   const response = await execute(path, request, true);
   if (!response.ok) throw await toApiError(response);
   if (response.status === 204) {
@@ -121,19 +121,19 @@ const requestJson = async <T>(path: string, request: InternalRequest): Promise<T
   return (await response.json()) as T;
 };
 
-export const apiClient = {
-  get: <T>(path: string, options: RequestOptions = {}): Promise<T> =>
-    requestJson<T>(path, { method: 'GET', ...options }),
-  post: <T>(path: string, body?: unknown, options: RequestOptions = {}): Promise<T> =>
-    requestJson<T>(path, { method: 'POST', body, ...options }),
-  patch: <T>(path: string, body?: unknown, options: RequestOptions = {}): Promise<T> =>
-    requestJson<T>(path, { method: 'PATCH', body, ...options }),
-  delete: <T>(path: string, options: RequestOptions = {}): Promise<T> =>
-    requestJson<T>(path, { method: 'DELETE', ...options }),
-  /** Evidence frames and exports arrive as authenticated blobs (bearer header). */
-  getBlob: async (path: string, options: RequestOptions = {}): Promise<Blob> => {
-    const response = await execute(path, { method: 'GET', ...options }, true);
-    if (!response.ok) throw await toApiError(response);
-    return response.blob();
+  export const apiClient = {
+    get: <T>(path: string, options: RequestOptions = { }): Promise<T> =>
+      requestJson<T>(path, {method: 'GET', ...options }),
+        post: <T>(path: string, body?: unknown, options: RequestOptions = { }): Promise<T> =>
+          requestJson<T>(path, {method: 'POST', body, ...options }),
+            patch: <T>(path: string, body?: unknown, options: RequestOptions = { }): Promise<T> =>
+              requestJson<T>(path, {method: 'PATCH', body, ...options }),
+                delete: <T>(path: string, options: RequestOptions = { }): Promise<T> =>
+                  requestJson<T>(path, {method: 'DELETE', ...options }),
+                    /** Evidence frames and exports arrive as authenticated blobs (bearer header). */
+                    getBlob: async (path: string, options: RequestOptions = { }): Promise<Blob> => {
+    const response = await execute(path, {method: 'GET', ...options }, true);
+                      if (!response.ok) throw await toApiError(response);
+                      return response.blob();
   },
 };

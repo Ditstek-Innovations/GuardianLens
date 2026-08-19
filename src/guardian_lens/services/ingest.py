@@ -138,6 +138,8 @@ class EventIngestService:
             channel="application",
             event_ref=str(row.id),
             source=request.source,
+            evidence_ref=values.get("evidence_ref"),
+            evidence_state=values.get("evidence_state"),
         )
         return IngestOutcome(row, created=True)
 

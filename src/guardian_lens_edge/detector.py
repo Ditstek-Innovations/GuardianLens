@@ -112,6 +112,15 @@ class NullDetector:
 
     def detect(self, frame: Frame) -> list[Detection]:
         self._frames_seen += 1
+        if self._frames_seen == 1 or self._frames_seen % 30 == 0:
+            logger.warning(
+                "YOLO not loaded (NullDetector): camera=%s seq=%s frames=%d "
+                "— no detections until --model and --model-manifest point at "
+                "a verified ONNX artefact",
+                frame.camera_id,
+                frame.sequence,
+                self._frames_seen,
+            )
         return []
 
 
@@ -184,6 +193,16 @@ class OnnxDetector:
         self._session = self._create_session()
         self._input_name = self._session.get_inputs()[0].name
         self._warm_up()
+        self._frames_seen = 0
+        logger.info(
+            "YOLO model ready: version=%s classes=%d input=%d artefact=%s "
+            "classes_sample=%s",
+            self._model_version,
+            len(self._classes),
+            self._input_size,
+            self._model_path.name,
+            self._classes[:12],
+        )
 
     @property
     def model_version(self) -> str:
@@ -318,6 +337,21 @@ class OnnxDetector:
                     ),
                     confidence=float(scores[index]),
                 )
+            )
+        self._frames_seen += 1
+        if self._frames_seen == 1 or self._frames_seen % 30 == 0:
+            top = ", ".join(
+                f"{item.class_name}={item.confidence:.2f}"
+                for item in detections[:8]
+            ) or "(none)"
+            logger.info(
+                "YOLO inference ok: version=%s camera=%s seq=%s "
+                "detections=%d [%s]",
+                self._model_version,
+                frame.camera_id,
+                frame.sequence,
+                len(detections),
+                top,
             )
         return detections
 

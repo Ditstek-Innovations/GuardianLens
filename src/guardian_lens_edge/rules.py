@@ -87,17 +87,31 @@ class CandidateDecision:
 _PERSON_CONTEXT_FLOOR = 0.50
 
 
+def _boxes_overlap(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> bool:
+    """True when two normalised boxes share any area (inclusive edges)."""
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    return ax1 <= bx2 and ax2 >= bx1 and ay1 <= by2 and ay2 >= by1
+
+
 def _inside_a_person(candidate, detections) -> bool:
-    """True when the candidate's bbox centre lies inside any person bbox."""
-    cx = (candidate.bbox_norm[0] + candidate.bbox_norm[2]) / 2
-    cy = (candidate.bbox_norm[1] + candidate.bbox_norm[3]) / 2
+    """True when the candidate is associated with a person in this frame.
+
+    A held phone or bottle often sits on the *edge* of the person box (ear,
+    outstretched hand). Requiring the object's centre to fall strictly inside
+    the person box dropped those detections, so nothing reached review even
+    though the model fired. Overlap of the two boxes is the held-vs-lying
+    discriminator: still purely per-frame geometry (BR-D-03), no identity.
+    """
     for other in detections:
         if other.class_name != "person":
             continue
         if other.confidence < _PERSON_CONTEXT_FLOOR:
             continue
-        x1, y1, x2, y2 = other.bbox_norm
-        if x1 <= cx <= x2 and y1 <= cy <= y2:
+        if _boxes_overlap(candidate.bbox_norm, other.bbox_norm):
             return True
     return False
 
@@ -194,6 +208,8 @@ class RuleEvaluator:
         self._config: AgentConfig | None = None
         self._dwell: dict[tuple[str, str, str], _DwellState] = {}
         self._last_emitted: dict[tuple[str, str, str], datetime] = {}
+        # Last evaluate() miss reasons — operational diagnostics only.
+        self.last_misses: list[str] = []
 
     def apply_config(self, config: AgentConfig | None) -> None:
         """Swap the active rule set atomically.
@@ -208,12 +224,16 @@ class RuleEvaluator:
         self, frame: Frame, detections: Sequence[Detection]
     ) -> list[CandidateDecision]:
         """Run D1 for one sampled frame. Returns zero or more candidates."""
+        self.last_misses = []
         if self._config is None:
-            # No configuration has ever been applied: no rules exist, so no
-            # candidate can exist. This is the absence of configuration, not
-            # a default (BR-001).
+            self.last_misses.append(
+                "no agent config applied yet — rules cannot fire"
+            )
             return []
+        seen = sorted({item.class_name for item in detections})
+        seen_text = ", ".join(seen) if seen else "(none)"
         candidates: list[CandidateDecision] = []
+        rules_for_camera = 0
         # Deterministic rule order regardless of document order.
         for rule in sorted(self._config.rules, key=lambda r: r.rule_id):
             # D1 row 1 — inactive rule: no candidate, nothing recorded at
@@ -231,12 +251,24 @@ class RuleEvaluator:
                     rule.rule_id,
                     rule.zone_id,
                 )
+                self.last_misses.append(
+                    f"rule {rule.human_readable!r} zone {rule.zone_id} missing"
+                )
                 continue
             if zone.camera_id != frame.camera_id:
                 continue
-            candidate = self._evaluate_rule(frame, rule, zone, detections)
+            rules_for_camera += 1
+            candidate, miss = self._evaluate_rule(
+                frame, rule, zone, detections, seen_text
+            )
             if candidate is not None:
                 candidates.append(candidate)
+            elif miss is not None:
+                self.last_misses.append(miss)
+        if rules_for_camera == 0:
+            self.last_misses.append(
+                f"no active rule on this camera ({frame.camera_id})"
+            )
         return candidates
 
     def _evaluate_rule(
@@ -245,15 +277,19 @@ class RuleEvaluator:
         rule: RuleConfig,
         zone: ZoneConfig,
         detections: Sequence[Detection],
-    ) -> CandidateDecision | None:
+        seen_text: str,
+    ) -> tuple[CandidateDecision | None, str | None]:
         bucket = _hour_bucket(frame.captured_at)
         key = (frame.camera_id, zone.zone_id, rule.rule_id)
         best_confidence: float | None = None
         best_bbox: tuple[float, float, float, float] | None = None
+        saw_class = False
+        reject: str | None = None
         for detection in detections:
             if detection.class_name != rule.detection_class:
                 # Not this rule's condition; another rule may consume it.
                 continue
+            saw_class = True
             # D1 row 2 — threshold. Comparison is >=: a detection exactly at
             # the configured limit passes (TRD 19.2 boundary target).
             if not detection.confidence >= rule.confidence_threshold:
@@ -262,6 +298,12 @@ class RuleEvaluator:
                     frame.camera_id,
                     rule.rule_id,
                     CounterKind.BELOW_THRESHOLD,
+                )
+                reject = (
+                    f"rule {rule.human_readable!r} class "
+                    f"{rule.detection_class!r}: confidence "
+                    f"{detection.confidence:.2f} < threshold "
+                    f"{rule.confidence_threshold:.2f}"
                 )
                 continue
             # D1 row 3 — zone. Anchor is the bbox bottom-centre.
@@ -273,11 +315,15 @@ class RuleEvaluator:
                     rule.rule_id,
                     CounterKind.OUTSIDE_ZONE,
                 )
+                reject = (
+                    f"rule {rule.human_readable!r} class "
+                    f"{rule.detection_class!r}: bbox outside zone {zone.name!r}"
+                )
                 continue
             # Person-context — the held-vs-lying discriminator. Purely
             # per-frame geometry (BR-D-03: deterministic, no inference
-            # after detection): the condition's bbox centre must lie inside
-            # some person detection's bbox. No identity is read or kept.
+            # after detection): the condition's box must overlap a person
+            # box. No identity is read or kept.
             if rule.must_be_carried and not _inside_a_person(
                 detection, detections
             ):
@@ -286,6 +332,12 @@ class RuleEvaluator:
                     frame.camera_id,
                     rule.rule_id,
                     CounterKind.CONTEXT_UNMET,
+                )
+                reject = (
+                    f"rule {rule.human_readable!r} class "
+                    f"{rule.detection_class!r}: must_be_carried but no "
+                    f"overlapping person box (person floor "
+                    f"{_PERSON_CONTEXT_FLOOR:.2f})"
                 )
                 continue
             if best_confidence is None or detection.confidence > best_confidence:
@@ -297,7 +349,12 @@ class RuleEvaluator:
             # broken — dwell requires the condition to persist across
             # CONSECUTIVE samples.
             self._dwell.pop(key, None)
-            return None
+            if not saw_class:
+                return None, (
+                    f"rule {rule.human_readable!r} watches "
+                    f"{rule.detection_class!r}; frame classes: {seen_text}"
+                )
+            return None, reject
 
         # D1 row 4 — dwell. The condition must have persisted for at least
         # dwell_seconds; elapsed exactly equal to the limit passes.
@@ -312,7 +369,10 @@ class RuleEvaluator:
                     bucket, frame.camera_id, rule.rule_id,
                     CounterKind.DWELL_UNMET,
                 )
-                return None
+                return None, (
+                    f"rule {rule.human_readable!r}: dwell unmet "
+                    f"({elapsed:.1f}s < {rule.dwell_seconds}s)"
+                )
 
         # Debounce — suppress a repeat of a continuing condition within
         # debounce_seconds of the LAST EMITTED candidate. A repeat at
@@ -325,7 +385,10 @@ class RuleEvaluator:
                     bucket, frame.camera_id, rule.rule_id,
                     CounterKind.DEBOUNCE_SUPPRESSED,
                 )
-                return None
+                return None, (
+                    f"rule {rule.human_readable!r}: debounce "
+                    f"({since_emit:.1f}s < {rule.debounce_seconds}s)"
+                )
 
         # D1 row 5 — candidate. The highest-confidence satisfying detection
         # is the one recorded (deterministic tie-break: first seen wins).
@@ -338,4 +401,4 @@ class RuleEvaluator:
             occurred_at=frame.captured_at,
             frame=frame,
             bbox_norm=best_bbox,
-        )
+        ), None

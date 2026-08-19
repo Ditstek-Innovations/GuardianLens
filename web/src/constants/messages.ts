@@ -58,6 +58,19 @@ export const MESSAGES = {
     agentRegistered: 'Agent registered — copy its credential now; it is never shown again.',
     agentRegisterFailed:
       'The agent was not registered. Check the connection and try again — nothing was stored.',
+    /** Gate G1 — registration records identity; it does not admit the model. */
+    modelRegistered:
+      'Model version registered — it is not approved and not deployed until you record an approval.',
+    modelRegisterFailed:
+      'The model version was not registered. Check the connection and try again — nothing was stored.',
+    modelRegisterConflict:
+      'That version is already registered. Versions are immutable identity — use a new version string.',
+    modelApproved:
+      'Approval recorded under your name. This is gate G1 evidence, not a site deployment.',
+    modelApproveFailed:
+      'The approval was not recorded. Check the connection and try again — the model is unchanged.',
+    modelApproveNeedsEvidence:
+      'Approval needs a model card and a datasheet reference on this version. Nothing was changed.',
   },
   reports: {
     /** BR-R-02 — provenance rides along in the exported file. */

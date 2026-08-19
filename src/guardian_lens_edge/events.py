@@ -13,6 +13,7 @@ historical event still shows what actually fired.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,6 +23,8 @@ from guardian_lens_edge.store import EdgeStore
 from guardian_lens_edge.uuid7 import generate_uuid7
 
 __all__ = ["EventBuilder", "iso_utc", "placeholder_jpeg"]
+
+logger = logging.getLogger(__name__)
 
 EVENT_SOURCE_GUARDIAN_LENS = "guardian_lens"
 
@@ -112,6 +115,16 @@ class EventBuilder:
             )
         evidence_path.write_bytes(
             frame_bytes if frame_bytes is not None else placeholder_jpeg()
+        )
+        logger.info(
+            "evidence spooled: event_id=%s camera=%s bytes=%d path=%s "
+            "class=%s conf=%.3f",
+            event_id,
+            candidate.camera_id,
+            evidence_path.stat().st_size,
+            evidence_path.name,
+            candidate.rule.detection_class,
+            candidate.confidence,
         )
         payload = {
             "event_id": event_id,

@@ -16,6 +16,7 @@ abstracts filesystem [MVP] vs S3 [V1] (TRD 6.4).
 
 from __future__ import annotations
 
+import logging
 import re
 import secrets
 from abc import ABC, abstractmethod
@@ -24,6 +25,8 @@ from pathlib import Path
 from uuid import UUID
 
 __all__ = ["EvidenceStore", "FilesystemEvidenceStore", "make_evidence_key"]
+
+_log = logging.getLogger(__name__)
 
 #: Everything a legal key may contain. Reads validate against this before
 #: touching storage, so a tampered evidence_ref cannot traverse paths.
@@ -86,6 +89,7 @@ class FilesystemEvidenceStore(EvidenceStore):
             # Immutability: a frame is never re-written (DATABASE.md 12.2).
             raise FileExistsError(f"evidence object already exists: {key}")
         path.write_bytes(content)
+        _log.info("evidence stored key=%s bytes=%d", key, len(content))
 
     def get(self, key: str) -> bytes | None:
         path = self._path(key)

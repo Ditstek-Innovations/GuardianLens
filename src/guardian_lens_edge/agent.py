@@ -130,19 +130,39 @@ class EdgeAgent:
         generation is stopped).
         """
         now = frame.captured_at
+        jpeg_bytes = len(frame.image_bytes) if frame.image_bytes is not None else 0
+        heartbeat = frame.sequence == 0 or frame.sequence % 30 == 0
         self._state.report_outbox_level(self._store.backpressure_level(), now)
         if not self._state.can_generate():
-            # Halted (or still starting): emits NO candidate events. The
-            # halt itself was loud — gaps open, CRITICAL logged (ADR-009).
+            if heartbeat:
+                logger.warning(
+                    "frame skipped — agent not generating: camera=%s seq=%s "
+                    "jpeg_bytes=%d state=%s",
+                    frame.camera_id,
+                    frame.sequence,
+                    jpeg_bytes,
+                    self._state.state.value
+                    if hasattr(self._state.state, "value")
+                    else str(self._state.state),
+                )
             return []
+        if heartbeat:
+            logger.info(
+                "frame captured: camera=%s seq=%s jpeg_bytes=%d at=%s",
+                frame.camera_id,
+                frame.sequence,
+                jpeg_bytes,
+                frame.captured_at.isoformat(),
+            )
         try:
             detections = self._detector.detect(frame)
         except Exception:  # noqa: BLE001 — MOD-2 failure row: drop frame,
             # count, continue; sustained failure degrades via the machine.
             logger.exception(
-                "inference failed on frame: camera=%s seq=%s",
+                "YOLO inference failed: camera=%s seq=%s jpeg_bytes=%d",
                 frame.camera_id,
                 frame.sequence,
+                jpeg_bytes,
             )
             self._state.report_inference_failure(now)
             return []
@@ -150,6 +170,35 @@ class EdgeAgent:
         if not self._state.can_generate():
             return []
         candidates = self._evaluator.evaluate(frame, detections)
+        watched: set[str] = set()
+        applied = self._config_sync.applied
+        if applied is not None:
+            watched = {
+                rule.detection_class
+                for rule in applied.rules
+                if rule.is_active
+            }
+        seen_watched = any(item.class_name in watched for item in detections)
+        if candidates:
+            logger.info(
+                "rule matched: camera=%s seq=%s events=%s",
+                frame.camera_id,
+                frame.sequence,
+                len(candidates),
+            )
+        elif heartbeat or seen_watched:
+            misses = self._evaluator.last_misses or ["(no miss detail)"]
+            logger.info(
+                "rule not matched: camera=%s seq=%s jpeg_bytes=%d "
+                "yolo_detections=%d seen=%s watched=%s why=%s",
+                frame.camera_id,
+                frame.sequence,
+                jpeg_bytes,
+                len(detections),
+                sorted({item.class_name for item in detections}) or ["(none)"],
+                sorted(watched) or ["(none)"],
+                misses,
+            )
         event_ids: list[str] = []
         for candidate in candidates:
             event_ids.append(
@@ -579,6 +628,13 @@ def main(argv: list[str] | None = None) -> int:
 
     data_dir = Path(args.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
+    edge_log = data_dir / "edge.log"
+    file_handler = logging.FileHandler(edge_log)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    logging.getLogger().addHandler(file_handler)
+    logger.info("edge capture log: %s", edge_log)
     store = EdgeStore(
         data_dir / "edge.sqlite3",
         warning_bytes=args.outbox_warning_bytes,
@@ -614,6 +670,11 @@ def main(argv: list[str] | None = None) -> int:
             # frames and returns no detections until a model passes gate
             # G1 and is stated explicitly via --model/--model-manifest.
             detector = NullDetector()
+            logging.getLogger(__name__).warning(
+                "YOLO not configured: rtsp mode is running NullDetector "
+                "(ingestion only). Pass --model and --model-manifest or "
+                "rules will never match."
+            )
     else:
         scenario = Scenario.load(args.scenario)
         frame_source = SyntheticSource(scenario, start_at=start_at)

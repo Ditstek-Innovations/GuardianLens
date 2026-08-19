@@ -358,6 +358,16 @@ class RtspSource:
         self._degraded_reported = False
         sequence = self._sequence
         self._sequence += 1
+        # Heartbeat, not every frame: 2 fps × N cameras would drown the log.
+        # First sample plus every 30th proves capture is alive and sized.
+        if sequence == 0 or sequence % 30 == 0:
+            logger.info(
+                "camera %s: captured JPEG sample seq=%d bytes=%d at=%s",
+                self._camera_id,
+                sequence,
+                len(jpeg_bytes),
+                captured_at.isoformat(),
+            )
         return Frame(
             camera_id=self._camera_id,
             captured_at=captured_at,

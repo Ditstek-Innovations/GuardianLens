@@ -54,24 +54,35 @@ export const useRulesQuery = () =>
       ),
   });
 
+const fetchModelVersions = async (signal?: AbortSignal): Promise<ModelVersionSummary[]> =>
+  unwrapItems(
+    await apiClient.get<ListResponse<ModelVersionSummary> | ModelVersionSummary[]>(
+      '/api/v1/model-versions',
+      { signal },
+    ),
+  );
+
+/** JSONB classes should be a string list; tolerate a malformed row so the table still renders. */
+export const modelClassNames = (classes: unknown): string[] =>
+  Array.isArray(classes)
+    ? classes.filter((value): value is string => typeof value === 'string' && value.trim() !== '')
+    : [];
+
+/** TRD §10.6 — GET /model-versions is site_admin scoped. */
+export const useModelVersionsQuery = () =>
+  useQuery({
+    queryKey: configKeys.models(),
+    queryFn: async ({ signal }) => fetchModelVersions(signal),
+  });
+
 /**
  * Derives the live list of detectable class names from all registered model
  * versions. Deduplicated and sorted so the rule form always reflects the
- * current approved model manifest — no manual maintenance required.
+ * current model manifest — no manual maintenance required.
  */
 export const useModelClassesQuery = () =>
   useQuery({
-    // Distinct key from configKeys.models() — both hit /api/v1/model-versions
-    // but return different shapes. Same key would cause a cache type collision.
-    queryKey: configKeys.modelClasses(),
-    queryFn: async ({ signal }) => {
-      const models = unwrapItems(
-        await apiClient.get<ListResponse<ModelVersionSummary> | ModelVersionSummary[]>(
-          '/api/v1/model-versions',
-          { signal },
-        ),
-      );
-      const allClasses = models.flatMap((m) => m.classes);
-      return [...new Set(allClasses)].sort();
-    },
+    queryKey: configKeys.models(),
+    queryFn: async ({ signal }) => fetchModelVersions(signal),
+    select: (models) => [...new Set(models.flatMap((model) => modelClassNames(model.classes)))].sort(),
   });

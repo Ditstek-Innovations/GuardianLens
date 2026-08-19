@@ -145,7 +145,7 @@ export const QueuePage = () => {
     content = (
       <EmptyState
         title="Queue clear — nothing awaits review"
-        detail="No unverified candidates are waiting. New candidates appear here as cameras report them."
+        detail="No unverified candidates are waiting. A detection becomes a review item only after an edge agent authenticates to this tenant, a frame matches an active rule's class, and ingest succeeds. Configuration shows agents, rules and detection models."
       />
     );
   } else if (isIncidentView) {

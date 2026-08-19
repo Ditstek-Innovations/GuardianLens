@@ -280,6 +280,50 @@ def test_frame_for_other_camera_does_not_touch_the_rule() -> None:
     assert counters.calls == []
 
 
+def test_must_be_carried_accepts_object_overlapping_person_box() -> None:
+    """A phone at the ear often sits on the person-box edge; centre-inside
+    would drop it and the review queue would stay empty."""
+    evaluator, counters = make_evaluator(
+        must_be_carried=True, debounce_seconds=0
+    )
+    person = detection(
+        class_name="person", bbox=(0.30, 0.20, 0.70, 0.90), confidence=0.9
+    )
+    phone_at_ear = detection(
+        class_name=HELMET_CLASS, bbox=(0.68, 0.15, 0.80, 0.28), confidence=0.8
+    )
+    emitted = evaluator.evaluate(make_frame(), [person, phone_at_ear])
+    assert len(emitted) == 1
+    assert counters.calls == []
+
+
+def test_must_be_carried_rejects_object_with_no_person_overlap() -> None:
+    evaluator, counters = make_evaluator(
+        must_be_carried=True, debounce_seconds=0
+    )
+    person = detection(
+        class_name="person", bbox=(0.10, 0.10, 0.30, 0.50), confidence=0.9
+    )
+    object_elsewhere = detection(
+        class_name=HELMET_CLASS, bbox=(0.60, 0.60, 0.80, 0.85), confidence=0.8
+    )
+    emitted = evaluator.evaluate(make_frame(), [person, object_elsewhere])
+    assert emitted == []
+    assert counters.kinds() == [CounterKind.CONTEXT_UNMET]
+    assert any("must_be_carried" in miss for miss in evaluator.last_misses)
+
+
+def test_miss_reason_names_class_mismatch() -> None:
+    evaluator, _ = make_evaluator(debounce_seconds=0)
+    emitted = evaluator.evaluate(
+        make_frame(), [detection(class_name="cell phone", confidence=0.9)]
+    )
+    assert emitted == []
+    assert evaluator.last_misses
+    assert "person_without_helmet" in evaluator.last_misses[0]
+    assert "cell phone" in evaluator.last_misses[0]
+
+
 def test_every_discard_path_has_a_distinct_counter() -> None:
     evaluator, counters = make_evaluator(
         confidence_threshold=0.5, debounce_seconds=30, dwell_seconds=2

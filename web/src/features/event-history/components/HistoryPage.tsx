@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
 import { PageHeading } from '@/components/layout/PageHeading';
@@ -15,7 +16,12 @@ import { EvidenceThumb } from './EvidenceThumb';
 import type { ChangeEvent, ReactNode } from 'react';
 import type { EventStatus } from '@/constants/events';
 
-const STATUS_OPTIONS: readonly { readonly value: EventStatus; readonly label: string }[] = [
+const VISIBLE_PAGE_SIZE = 10;
+
+const STATUS_OPTIONS: readonly {
+  readonly value: EventStatus;
+  readonly label: string;
+}[] = [
   { value: EVENT_STATUS.ACCEPTED, label: 'Accepted' },
   { value: EVENT_STATUS.CORRECTED, label: 'Corrected' },
   { value: EVENT_STATUS.REJECTED, label: 'Rejected' },
@@ -39,8 +45,10 @@ export const HistoryPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const status = parseStatus(searchParams.get('status'));
   const historyQuery = useHistoryQuery(status);
+  const [page, setPage] = useState(0);
 
   const handleStatusChange = (event: ChangeEvent<HTMLSelectElement>): void => {
+    setPage(0);
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -52,9 +60,24 @@ export const HistoryPage = () => {
   };
 
   const items = historyQuery.data?.pages.flatMap((page) => page.items) ?? [];
-  const total = historyQuery.data?.pages[0]?.queue_depth;
-  const statusLabel =
-    STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
+  const total = historyQuery.data?.pages[0]?.queue_depth ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / VISIBLE_PAGE_SIZE));
+  const start = page * VISIBLE_PAGE_SIZE;
+  const visibleItems = items.slice(start, start + VISIBLE_PAGE_SIZE);
+  const statusLabel = STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages - 1));
+  }, [totalPages]);
+
+  const handleNext = async (): Promise<void> => {
+    const nextPage = page + 1;
+    if (nextPage >= totalPages) return;
+    if ((nextPage + 1) * VISIBLE_PAGE_SIZE > items.length && historyQuery.hasNextPage) {
+      await historyQuery.fetchNextPage();
+    }
+    setPage(nextPage);
+  };
 
   let content: ReactNode;
   if (historyQuery.isPending) {
@@ -86,17 +109,31 @@ export const HistoryPage = () => {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-fg-muted">
-              <th scope="col" className="h-10 px-4">Capture</th>
-              <th scope="col" className="h-10 px-4">When</th>
-              <th scope="col" className="h-10 px-4">Camera · Zone</th>
-              <th scope="col" className="h-10 px-4">Rule</th>
-              <th scope="col" className="h-10 px-4">Confidence</th>
-              <th scope="col" className="h-10 px-4">Analysed by</th>
-              <th scope="col" className="h-10 px-4">Disposition</th>
+              <th scope="col" className="h-10 px-4">
+                Capture
+              </th>
+              <th scope="col" className="h-10 px-4">
+                When
+              </th>
+              <th scope="col" className="h-10 px-4">
+                Camera · Zone
+              </th>
+              <th scope="col" className="h-10 px-4">
+                Rule
+              </th>
+              <th scope="col" className="h-10 px-4">
+                Confidence
+              </th>
+              <th scope="col" className="h-10 px-4">
+                Analysed by
+              </th>
+              <th scope="col" className="h-10 px-4">
+                Disposition
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {items.map((item) => (
+            {visibleItems.map((item) => (
               <tr key={item.id} className="transition-colors duration-120 hover:bg-surface-2">
                 <td className="px-4 py-2">
                   <Link
@@ -113,7 +150,10 @@ export const HistoryPage = () => {
                 <td className="px-4 py-2 text-fg-muted">
                   {item.camera.name} · {item.zone.name}
                 </td>
-                <td className="max-w-xs truncate px-4 py-2 text-fg" title={item.rule.human_readable}>
+                <td
+                  className="max-w-xs truncate px-4 py-2 text-fg"
+                  title={item.rule.human_readable}
+                >
                   <Link
                     to={ROUTES.queueEvent(item.id)}
                     className="rounded-control text-fg hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
@@ -160,23 +200,37 @@ export const HistoryPage = () => {
           </Select>
         </FormField>
         <p className="ml-auto pb-2.5 text-sm tabular-nums text-fg-muted">
-          {total !== undefined ? `${total} ${statusLabel.toLowerCase()} capture(s) in total` : ''}
+          {historyQuery.data !== undefined
+            ? `${total} ${statusLabel.toLowerCase()} capture(s) in total`
+            : ''}
         </p>
       </div>
       {content}
-      {historyQuery.hasNextPage ? (
-        <div className="flex justify-center">
-          <Button
-            variant="secondary"
-            onClick={() => void historyQuery.fetchNextPage()}
-            isLoading={historyQuery.isFetchingNextPage}
-          >
-            Load more
-          </Button>
+      {items.length > 0 ? (
+        <div className="flex items-center justify-between gap-3 rounded-card border border-border bg-surface-1 px-4 py-3 shadow-ambient">
+          <p className="text-sm tabular-nums text-fg-muted">
+            Page {page + 1} of {totalPages} · {total} records
+          </p>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page === 0}
+              onClick={() => setPage((current) => Math.max(0, current - 1))}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page + 1 >= totalPages}
+              isLoading={historyQuery.isFetchingNextPage}
+              onClick={() => void handleNext()}
+            >
+              Next
+            </Button>
+          </div>
         </div>
-      ) : items.length > 0 ? (
-        // CS-PG-13 — end-of-list is a rendered state, not silence.
-        <p className="text-center text-sm text-fg-muted">End of {statusLabel.toLowerCase()} history.</p>
       ) : null}
     </section>
   );

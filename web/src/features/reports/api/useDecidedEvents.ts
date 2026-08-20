@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 
 import { apiClient } from '@/lib/api/client';
 
@@ -15,18 +15,21 @@ const PAGE_LIMIT = 200;
  * retained and VISIBLE; this is where a customer sees each one.
  */
 export const useDecidedEvents = (params: ReportParams, status: string) =>
-  useQuery({
+  useInfiniteQuery({
     queryKey: [...reportKeys.all, 'decided', status, params] as const,
-    queryFn: ({ signal }) =>
+    queryFn: ({ pageParam, signal }) =>
       apiClient.get<QueuePage>('/api/v1/events', {
         query: {
           status,
           from: params.from,
           to: params.to,
           limit: PAGE_LIMIT,
+          ...(pageParam !== undefined ? { cursor: pageParam } : {}),
           ...(params.siteId !== null ? { site_id: params.siteId } : {}),
         },
         signal,
       }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: params.from !== '' && params.to !== '',
   });

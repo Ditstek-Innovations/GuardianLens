@@ -2,12 +2,15 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { PageHeading } from '@/components/layout/PageHeading';
-import { Button, Chip, EmptyState, ErrorState, Kbd, Skeleton } from '@/components/ui';
+import { Button, Chip, EmptyState, ErrorState, Kbd, Modal, Skeleton } from '@/components/ui';
 import { QUEUE_NAV_KEY } from '@/constants/events';
+import { MESSAGES } from '@/constants/messages';
 import { ROUTES } from '@/constants/routes';
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { useToast } from '@/hooks/useToast';
 
+import { useAcceptAllQueue } from '../api/useAcceptAllQueue';
 import { flattenQueueItems, useQueueQuery } from '../api/useQueueQuery';
 import { useIncidentsQuery } from '../api/useIncidentsQuery';
 import { IncidentRow } from './IncidentRow';
@@ -19,12 +22,33 @@ import type { IncidentGroup } from '@/lib/api/types';
 
 type QueueView = 'incidents' | 'all';
 
-/*
- * The review queue deliberately has NO bulk affordances: no checkboxes, no
- * select-all, no multi-select and no bulk decision control — BR-V-02, FR-047,
- * DP-3, CS-B-01. One candidate, one decision, one act. Incident grouping
- * collapses the VIEW only: opening a group walks its members one by one.
- */
+const AcceptAllDialog = ({
+  count,
+  isSubmitting,
+  onConfirm,
+  onCancel,
+}: {
+  readonly count: number;
+  readonly isSubmitting: boolean;
+  readonly onConfirm: () => void;
+  readonly onCancel: () => void;
+}) => (
+  <Modal title="Accept all records" onClose={() => !isSubmitting && onCancel()}>
+    <p className="text-sm text-fg-muted">
+      Accept all {count} records currently awaiting review? Each record will be verified under your
+      name. This cannot be undone.
+    </p>
+    <div className="mt-6 flex justify-end gap-3">
+      <Button variant="ghost" onClick={onCancel} disabled={isSubmitting}>
+        Cancel
+      </Button>
+      <Button variant="ok" onClick={onConfirm} isLoading={isSubmitting}>
+        Accept {count} records
+      </Button>
+    </div>
+  </Modal>
+);
+
 export const QueuePage = () => {
   usePageTitle('Review queue');
   const navigate = useNavigate();
@@ -32,16 +56,17 @@ export const QueuePage = () => {
   const query = useQueueQuery();
   const incidentsQuery = useIncidentsQuery();
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [isConfirmingAcceptAll, setIsConfirmingAcceptAll] = useState(false);
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const acceptAll = useAcceptAllQueue();
+  const { showToast } = useToast();
 
   const items = query.data === undefined ? [] : flattenQueueItems(query.data.pages);
   const incidents = incidentsQuery.data?.incidents ?? [];
   const isIncidentView = view === 'incidents';
   const itemCount = isIncidentView ? incidents.length : items.length;
   const selected = itemCount === 0 ? 0 : Math.min(selectedIndex, itemCount - 1);
-  const selectedId = isIncidentView
-    ? incidents[selected]?.incident_key
-    : items[selected]?.id;
+  const selectedId = isIncidentView ? incidents[selected]?.incident_key : items[selected]?.id;
   const queueDepth = isIncidentView
     ? incidentsQuery.data?.queue_depth
     : query.data?.pages[0]?.queue_depth;
@@ -99,6 +124,26 @@ export const QueuePage = () => {
 
   const handleLoadMore = (): void => {
     void query.fetchNextPage();
+  };
+
+  const handleAcceptAll = (): void => {
+    acceptAll.mutate(undefined, {
+      onSuccess: (result) => {
+        setIsConfirmingAcceptAll(false);
+        if (result.failed === 0) {
+          showToast({ tone: 'success', message: MESSAGES.decision.allAccepted(result.accepted) });
+        } else {
+          showToast({
+            tone: 'notice',
+            message: MESSAGES.decision.allAcceptedPartial(result),
+          });
+        }
+      },
+      onError: () => {
+        setIsConfirmingAcceptAll(false);
+        showToast({ tone: 'failure', message: MESSAGES.decision.allAcceptFailed });
+      },
+    });
   };
 
   const registerRow = (eventId: string, element: HTMLButtonElement | null): void => {
@@ -221,6 +266,14 @@ export const QueuePage = () => {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <Button
+            size="sm"
+            variant="ok"
+            disabled={(queueDepth ?? 0) === 0 || acceptAll.isPending}
+            onClick={() => setIsConfirmingAcceptAll(true)}
+          >
+            Accept all
+          </Button>
           {/* View toggle — grouping is presentation; both views show the
               same candidates and the same one-by-one decisions. */}
           <div className="flex gap-1">
@@ -249,6 +302,14 @@ export const QueuePage = () => {
       </header>
       <WhyNotReviewPanel rows={whyNotReview} />
       {content}
+      {isConfirmingAcceptAll ? (
+        <AcceptAllDialog
+          count={queueDepth ?? 0}
+          isSubmitting={acceptAll.isPending}
+          onConfirm={handleAcceptAll}
+          onCancel={() => setIsConfirmingAcceptAll(false)}
+        />
+      ) : null}
     </section>
   );
 };

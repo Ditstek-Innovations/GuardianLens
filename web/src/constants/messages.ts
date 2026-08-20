@@ -19,7 +19,14 @@ export const MESSAGES = {
     corrected: 'Correction recorded — the original model output is retained alongside it.',
     /** 409 — first decision wins (BR-V-04); the queue invalidates on settle. */
     conflict: 'Another reviewer decided this first — the queue has refreshed.',
-    failed: 'The decision was not recorded. Check the connection and try again — nothing was saved.',
+    failed:
+      'The decision was not recorded. Check the connection and try again — nothing was saved.',
+    allAccepted: (count: number): string =>
+      `${count} records accepted — each verified record now carries your name.`,
+    allAcceptedPartial: (result: { accepted: number; failed: number }): string =>
+      `${result.accepted} records accepted; ${result.failed} could not be accepted. The queue has refreshed.`,
+    allAcceptFailed:
+      'The records could not be accepted. Check the connection and try again — the queue has refreshed.',
   },
   config: {
     ruleActivated: (ruleName: string): string =>
@@ -50,8 +57,7 @@ export const MESSAGES = {
     zoneSaveFailed:
       'The zone was not saved. Check the connection and try again — nothing was stored.',
     /** BR-001 — creation is inert; activation is a separate, confirmed act. */
-    ruleCreated:
-      'Rule created inactive — nothing is monitored until you activate it explicitly.',
+    ruleCreated: 'Rule created inactive — nothing is monitored until you activate it explicitly.',
     ruleCreateFailed:
       'The rule was not created. Check the connection and try again — nothing was stored.',
     /** The one-time credential contract, stated at the moment it matters. */

@@ -6,6 +6,10 @@ import { Button, Logo, Modal, ToastProvider } from '@/components/ui';
 import { NAV_GROUP_ORDER, NAV_ITEMS } from '@/constants/navigation';
 import { ROUTES } from '@/constants/routes';
 import { useQueueQuery } from '@/features/review-queue';
+import {
+  playReviewAlertSound,
+  unlockReviewAlertSound,
+} from '@/features/review-queue/lib/reviewAlertSound';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils/cn';
 
@@ -111,6 +115,27 @@ const QueueDepthChip = ({ depth }: { readonly depth: number | undefined }) => (
     <span>awaiting review</span>
   </span>
 );
+
+const SoundOnIcon = () => (
+  <svg {...navIconProps} width={18} height={18}>
+    <path d="M11 5 7 8H4v8h3l4 3V5Z" />
+    <path d="M15 9a4 4 0 0 1 0 6M17.5 6.5a7.5 7.5 0 0 1 0 11" />
+  </svg>
+);
+
+const SoundOffIcon = () => (
+  <svg {...navIconProps} width={18} height={18}>
+    <path d="M11 5 7 8H4v8h3l4 3V5Z" />
+    <path d="m15 10 5 5M20 10l-5 5" />
+  </svg>
+);
+
+const SOUND_ENABLED_KEY = 'guardian-lens.review-sound-enabled';
+
+const initialSoundEnabled = (): boolean => {
+  if (typeof window === 'undefined') return true;
+  return window.localStorage.getItem(SOUND_ENABLED_KEY) !== 'false';
+};
 
 // ─── Principal menu (CS-SH-09) ────────────────────────────────────────────
 
@@ -360,11 +385,52 @@ export const AppShell = () => {
   const { principal, signOut } = useAuth();
   const location = useLocation();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isReviewSoundEnabled, setIsReviewSoundEnabled] = useState(initialSoundEnabled);
+  const previousQueueIdsRef = useRef<Set<string> | null>(null);
 
   // One queue subscription for the whole shell — the header chip and the
   // rail badge render the same cached figure (CS-SH-03).
   const queueQuery = useQueueQuery();
   const queueDepth = queueQuery.data?.pages[0]?.queue_depth;
+  const firstQueuePage = queueQuery.data?.pages[0];
+
+  // A browser requires one user gesture before Web Audio can run. Unlock on
+  // the operator's first interaction, then notification audio can play while
+  // this tab is in the background.
+  useEffect(() => {
+    if (!isReviewSoundEnabled) return undefined;
+    const unlock = (): void => unlockReviewAlertSound();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, [isReviewSoundEnabled]);
+
+  useEffect(() => {
+    if (firstQueuePage === undefined) return;
+    const currentIds = new Set(firstQueuePage.items.map((item) => item.id));
+    const previousIds = previousQueueIdsRef.current;
+    previousQueueIdsRef.current = currentIds;
+    if (
+      isReviewSoundEnabled &&
+      previousIds !== null &&
+      [...currentIds].some((id) => !previousIds.has(id))
+    ) {
+      playReviewAlertSound();
+    }
+  }, [firstQueuePage, isReviewSoundEnabled]);
+
+  const toggleReviewSound = (): void => {
+    const enabled = !isReviewSoundEnabled;
+    setIsReviewSoundEnabled(enabled);
+    window.localStorage.setItem(SOUND_ENABLED_KEY, String(enabled));
+    if (enabled) {
+      unlockReviewAlertSound();
+      playReviewAlertSound();
+    }
+  };
 
   // CS-SH-04 — the drawer closes on navigation.
   useEffect(() => {
@@ -423,6 +489,16 @@ export const AppShell = () => {
             {/* CS-SH-03 — depth is shell chrome, visible from every screen
                 and at every width (CS-SH-04). */}
             <QueueDepthChip depth={queueDepth} />
+            <button
+              type="button"
+              onClick={toggleReviewSound}
+              aria-label={isReviewSoundEnabled ? 'Mute new review sounds' : 'Enable new review sounds'}
+              aria-pressed={isReviewSoundEnabled}
+              title={isReviewSoundEnabled ? 'New review sound is on' : 'New review sound is off'}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
+            >
+              {isReviewSoundEnabled ? <SoundOnIcon /> : <SoundOffIcon />}
+            </button>
             <ThemeToggle />
             <PrincipalMenu fullName={principal.fullName} onSignOut={signOut} />
           </div>

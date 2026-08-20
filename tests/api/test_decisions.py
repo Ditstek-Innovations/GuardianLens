@@ -210,6 +210,27 @@ def test_correction_retains_original_value(
     assert str(zone_now) == str(api_seed["zone_a2"])
 
 
+def test_correction_options_are_named_and_scoped_for_reviewer(
+    client, api_seed, agent_token, reviewer_token
+):
+    event_id = create_unverified_event(client, api_seed, agent_token)
+    response = client.get(
+        f"/api/v1/events/{event_id}/correction-options",
+        headers=bearer(reviewer_token),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert {item["id"] for item in body["zones"]} == {
+        str(api_seed["zone_a"]),
+        str(api_seed["zone_a2"]),
+    }
+    assert all(item["name"] for item in body["zones"])
+    assert {item["id"] for item in body["rules"]} == {
+        str(api_seed["rule_a"])
+    }
+    assert "Helmet required" in body["rules"][0]["name"]
+
+
 def test_correct_requires_corrections(client, api_seed, agent_token, reviewer_token):
     event_id = create_unverified_event(client, api_seed, agent_token)
     response = _decide(

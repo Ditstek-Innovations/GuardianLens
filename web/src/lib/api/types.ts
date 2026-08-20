@@ -138,6 +138,16 @@ export interface EventDetail extends QueueEventItem {
   };
 }
 
+export interface CorrectionChoice {
+  id: string;
+  name: string;
+}
+
+export interface CorrectionOptions {
+  zones: CorrectionChoice[];
+  rules: CorrectionChoice[];
+}
+
 export interface DecisionResponse {
   id: string;
   status: EventStatus;

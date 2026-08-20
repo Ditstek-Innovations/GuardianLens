@@ -27,7 +27,9 @@ dependencies = [
 # RTSP decode is edge-plane only and heavy; the control plane, CI's
 # workflow suites and the synthetic path never need it (TRD 13.2).
 edge-camera = [
-    "opencv-python-headless>=4.9",
+    # Keep the deployed camera path on the established OpenCV 4 API/FFmpeg
+    # behaviour; OpenCV 5 is not yet covered by the RTSP integration suite.
+    "opencv-python-headless>=4.9,<5",
 ]
 dev = [
     "bandit>=1.7",

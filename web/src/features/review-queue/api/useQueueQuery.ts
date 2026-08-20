@@ -28,8 +28,9 @@ export const useQueueQuery = () =>
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     staleTime: QUEUE_STALE_TIME_MS,
     refetchInterval: QUEUE_POLL_INTERVAL_MS,
-    // CS-P-07 — polling pauses when the document is hidden.
-    refetchIntervalInBackground: false,
+    // New review candidates are operational alerts: keep the shell's queue
+    // subscription alive while the operator is working in another tab.
+    refetchIntervalInBackground: true,
   });
 
 export const flattenQueueItems = (pages: readonly QueuePage[]): QueueEventItem[] =>

@@ -21,6 +21,7 @@ import { formatTimestamp } from '@/lib/format/formatTimestamp';
 import { assertNever } from '@/lib/utils/assertNever';
 
 import { useEventQuery } from '../api/useEventQuery';
+import { useCorrectionOptions } from '../api/useCorrectionOptions';
 import { useEvidence } from '../api/useEvidence';
 import { useSubmitDecision } from '../api/useSubmitDecision';
 import { CorrectionForm } from './CorrectionForm';
@@ -130,6 +131,7 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
   const [isFrameRendered, setIsFrameRendered] = useState(false);
   const [hasFrameFailed, setHasFrameFailed] = useState(false);
   const [conflict, setConflict] = useState<ConflictState | null>(null);
+  const correctionOptions = useCorrectionOptions(eventId, dialog === 'correct');
 
   const queueItems = queueQuery.data === undefined ? [] : flattenQueueItems(queueQuery.data.pages);
   const currentIndex = queueItems.findIndex((item) => item.id === eventId);
@@ -437,6 +439,8 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
         <CorrectionForm
           event={event}
           isSubmitting={submitDecision.isPending}
+          options={correctionOptions.data}
+          isLoadingOptions={correctionOptions.isPending}
           onSubmit={handleCorrectSubmit}
           onCancel={handleDialogClose}
         />

@@ -28,6 +28,8 @@ from guardian_lens.repositories.events import EventRepository, sessionize
 from guardian_lens.repositories.evidence import EvidenceStore
 from guardian_lens.schemas.events import (
     DecisionResponse,
+    CorrectionChoice,
+    CorrectionOptionsResponse,
     DecisionReviewer,
     EventDetail,
     IncidentGroup,
@@ -220,6 +222,46 @@ def get_event(
         decided_at=row.decided_at,
         site_timezone=row.site_timezone,
         version=row.version,
+    )
+
+
+@router.get(
+    "/events/{event_pk}/correction-options",
+    response_model=CorrectionOptionsResponse,
+)
+def get_correction_options(
+    event_pk: UUID,
+    principal: HumanPrincipal = Depends(require_queue_read),
+    context: TenantContext = Depends(get_tenant_context),
+) -> CorrectionOptionsResponse:
+    """Human-readable choices; UUIDs remain an implementation detail."""
+    event = EventRepository(context.session).get_scoped(
+        event_pk, principal.site_ids()
+    )
+    if event is None:
+        raise NotFoundError("event not found")
+
+    configuration = ConfigRepository(context.session)
+    zones = [
+        zone
+        for zone in configuration.list_zones([event.site_id])
+        if zone.camera_id == event.camera_id
+    ]
+    zone_ids = {zone.id for zone in zones}
+    rules = [
+        rule
+        for rule in configuration.list_rules([event.site_id])
+        if rule.zone_id in zone_ids and rule.is_active
+    ]
+    return CorrectionOptionsResponse(
+        zones=[CorrectionChoice(id=zone.id, name=zone.name) for zone in zones],
+        rules=[
+            CorrectionChoice(
+                id=rule.id,
+                name=f"{rule.human_readable} ({rule.detection_class})",
+            )
+            for rule in rules
+        ],
     )
 
 

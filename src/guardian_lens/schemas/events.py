@@ -112,6 +112,16 @@ class QueueRule(BaseModel):
     human_readable: str | None
 
 
+class CorrectionChoice(BaseModel):
+    id: UUID
+    name: str
+
+
+class CorrectionOptionsResponse(BaseModel):
+    zones: list[CorrectionChoice]
+    rules: list[CorrectionChoice]
+
+
 class QueueItem(BaseModel):
     id: UUID
     camera: QueueCamera

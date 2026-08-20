@@ -117,6 +117,7 @@ class IdentityRepository:
         clock_skew_ms: int,
         applied_config_version: int | None,
         agent_version: str | None,
+        review_block: list[dict] | None = None,
     ) -> bool:
         """Apply one health beat. last_health_at drives agent_down gap
         inference; applied_config_version is ADR-008's reported fact —
@@ -131,6 +132,8 @@ class IdentityRepository:
             values["applied_config_version"] = applied_config_version
         if agent_version is not None:
             values["agent_version"] = agent_version
+        if review_block is not None:
+            values["review_block"] = review_block
         result = self._session.execute(
             sa.update(agents).where(agents.c.id == agent_id).values(**values)
         )

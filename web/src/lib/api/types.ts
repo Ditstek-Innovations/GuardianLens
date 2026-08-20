@@ -69,11 +69,24 @@ export interface QueueEventItem {
   site_timezone?: string;
 }
 
+export interface WhyNotReview {
+  camera_id: string;
+  camera_name: string;
+  stream: string;
+  last_seen_classes: string[];
+  watched_classes: string[];
+  why_not_review: string[];
+  matched: boolean;
+  observed_at?: string | null;
+}
+
 export interface QueuePage {
   items: QueueEventItem[];
   /** Returned on every queue response so the UI honours DP-4 without a second request. */
   queue_depth: number;
   next_cursor: string | null;
+  /** Latest edge miss snapshot — why a camera has not produced a Review item. */
+  why_not_review?: WhyNotReview[];
 }
 
 /**
@@ -102,6 +115,7 @@ export interface IncidentQueueResponse {
   gap_seconds: number;
   /** True when the grouping scan hit its row cap — counts may be partial. */
   capped: boolean;
+  why_not_review?: WhyNotReview[];
 }
 
 export interface EventDetail extends QueueEventItem {

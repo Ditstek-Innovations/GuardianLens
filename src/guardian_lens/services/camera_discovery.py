@@ -32,6 +32,39 @@ class DiscoveredCamera:
     manufacturer: Optional[str] = None
 
 
+def anonymous_rtsp_url(ip_address: str, port: int, rtsp_path: str) -> str:
+    """Build an RTSP URL with no camera login."""
+    return camera_rtsp_url(ip_address, port, rtsp_path)
+
+
+def camera_rtsp_url(
+    ip_address: str,
+    port: int,
+    rtsp_path: str,
+    *,
+    username: str | None = None,
+    password: str | None = None,
+) -> str:
+    """Build the URL that will be sealed onto a registered camera.
+
+    The edge agent uses this stored URL — there is no second hardcoded
+    stream. Username/password are optional; omit them only when the camera
+    truly allows anonymous RTSP.
+    """
+    from urllib.parse import quote
+
+    path = rtsp_path.strip().lstrip("/")
+    host = ip_address.strip()
+    origin = f"{host}:{int(port)}/{path}"
+    user = (username or "").strip()
+    secret = password or ""
+    if user and secret:
+        return f"rtsp://{quote(user, safe='')}:{quote(secret, safe='')}@{origin}"
+    if user or secret:
+        raise ValueError("RTSP username and password must both be set, or neither")
+    return f"rtsp://{origin}"
+
+
 class RTSPProbeService:
     """Detects RTSP cameras by probing common RTSP ports and paths.
 
@@ -153,7 +186,7 @@ class RTSPProbeService:
 
         for path in self.DEFAULT_RTSP_PATHS:
             try:
-                stream_url = f"rtsp://{ip}:{port}/{path}"
+                stream_url = anonymous_rtsp_url(ip, port, path)
 
                 # Use asyncio timeout
                 try:

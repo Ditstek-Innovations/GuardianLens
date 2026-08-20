@@ -185,7 +185,13 @@ def test_run_scenario_delivers_event_and_health(tmp_path: Path) -> None:
     health = plane.received_health[0]
     # Exactly the control plane's AgentHealthRequest (extra="forbid"):
     # identity comes from the agent token, richer state stays local.
-    assert set(health) == {"sent_at", "applied_config_version", "agent_version"}
+    assert set(health) == {
+        "sent_at",
+        "applied_config_version",
+        "agent_version",
+        "review_block",
+    }
+    assert isinstance(health["review_block"], list)
     assert health["applied_config_version"] == 1
     assert health["sent_at"] == "2026-08-12T09:00:03Z"
 

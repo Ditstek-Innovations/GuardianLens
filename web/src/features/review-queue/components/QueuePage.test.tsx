@@ -129,4 +129,30 @@ describe('QueuePage', () => {
     expect(await screen.findByText(/queue clear/i)).toBeInTheDocument();
     expect(screen.getByText(/queue depth: 0/i)).toBeInTheDocument();
   });
+
+  it('shows why Review is empty from the latest edge snapshot', async () => {
+    stubQueueApi(
+      makeQueuePage([], 0),
+      makeIncidentsResponse([], 0, [
+        {
+          camera_id: 'camera-1',
+          camera_name: 'Bay 3 entrance',
+          stream: 'online',
+          last_seen_classes: ['person', 'chair'],
+          watched_classes: ['cell phone'],
+          why_not_review: [
+            "rule 'Mobile uses' watches 'cell phone'; frame classes: person, chair",
+          ],
+          matched: false,
+        },
+      ]),
+    );
+
+    renderQueuePage();
+
+    expect(await screen.findByText('Why Review is empty')).toBeInTheDocument();
+    expect(screen.getByText('Bay 3 entrance')).toBeInTheDocument();
+    expect(screen.getByText(/watches 'cell phone'/)).toBeInTheDocument();
+    expect(screen.getByText(/YOLO last saw: person, chair/)).toBeInTheDocument();
+  });
 });

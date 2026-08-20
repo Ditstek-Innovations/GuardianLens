@@ -88,6 +88,11 @@ def agent_health(
         sent_at=body.sent_at,
         applied_config_version=body.applied_config_version,
         agent_version=body.agent_version,
+        review_block=(
+            [item.model_dump(mode="json") for item in body.review_block]
+            if body.review_block is not None
+            else None
+        ),
     )
     return AgentHealthResponse(clock_skew_ms=skew)
 

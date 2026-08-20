@@ -64,6 +64,7 @@ agents = sa.Table(
     sa.Column("applied_config_version", sa.BigInteger),
     sa.Column("clock_skew_ms", sa.Integer),
     sa.Column("status", sa.String(20)),
+    sa.Column("review_block", JSONB),
 )
 
 sites = sa.Table(

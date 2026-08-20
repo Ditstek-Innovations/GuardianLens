@@ -27,14 +27,39 @@ interface CameraStatusPresentation {
 // TRD §7.4 StreamHealthIndicator — a degraded state must be unmistakable,
 // and never colour alone (NFR-ACC-02).
 const STATUS_PRESENTATION: Partial<Record<string, CameraStatusPresentation>> = {
-  active: { label: 'Active', glyph: 'check', variant: 'ok' },
+  active: { label: 'Online', glyph: 'check', variant: 'ok' },
   degraded: { label: 'Degraded', glyph: 'alert', variant: 'warn' },
-  disconnected: { label: 'Disconnected', glyph: 'cross', variant: 'danger' },
+  disconnected: { label: 'Stream down', glyph: 'cross', variant: 'danger' },
   disabled: { label: 'Disabled', glyph: 'circle', variant: 'neutral' },
 };
 
 const statusPresentation = (status: string): CameraStatusPresentation =>
   STATUS_PRESENTATION[status] ?? { label: status, glyph: 'dot', variant: 'neutral' };
+
+const statusDetail = (status: string): string | null => {
+  if (status === 'disconnected') {
+    return 'No video is arriving. The edge agent cannot open this stream.';
+  }
+  if (status === 'active') {
+    return 'Stream is working.';
+  }
+  if (status === 'disabled') {
+    return 'Not watched until you enable it.';
+  }
+  if (status === 'degraded') {
+    return 'Stream is up but frames are failing to decode.';
+  }
+  return null;
+};
+
+const streamCounts = (cameras: readonly CameraSummary[]) => {
+  const registered = cameras.length;
+  const disabled = cameras.filter((camera) => camera.status === 'disabled').length;
+  const online = cameras.filter((camera) => camera.status === 'active').length;
+  const streamDown = cameras.filter((camera) => camera.status === 'disconnected').length;
+  const degraded = cameras.filter((camera) => camera.status === 'degraded').length;
+  return { registered, online, streamDown, disabled, degraded };
+};
 
 interface PendingCamera {
   readonly siteId: string;
@@ -85,7 +110,7 @@ const ReplaceCredentialDialog = ({
         <FormField
           label="New stream URL (write-only)"
           required
-          hint="RTSP URL including credentials. Sealed on save; never shown again."
+          hint="The URL this registered camera will use, including login if the camera requires it — e.g. rtsp://user:pass@192.168.0.19:554/stream2. Sealed on save."
           error={error ?? undefined}
         >
           <Input
@@ -329,7 +354,7 @@ export const CamerasSection = () => {
       <FormField
         label="Stream URL (write-only)"
         required
-        hint="RTSP URL including credentials. Stored encrypted; never shown again."
+        hint="The edge watches this registered URL — not a shared static stream. Include the camera login when the device returns 401, e.g. rtsp://user:pass@192.168.0.19:554/stream2."
         error={formError ?? undefined}
         className="lg:col-span-6"
       >
@@ -396,13 +421,38 @@ export const CamerasSection = () => {
     <>
       <ConfigSection
         title="Cameras"
-        description="Streams the edge agent watches. The credential is sealed on save and never shown or returned again."
+        description="Registered cameras vs live stream health. Online means the edge is receiving video; Stream down means it cannot."
         query={camerasQuery}
         emptyDetail="No cameras are registered."
         actions={form}
         actionLabel="Add camera"
       >
-        {(cameras) => (
+        {(cameras) => {
+          const counts = streamCounts(cameras);
+          return (
+          <>
+          <div
+            className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3"
+            aria-live="polite"
+          >
+            <Chip variant="neutral">{counts.registered} registered</Chip>
+            <Chip variant="ok" icon={<ChipIcon glyph="check" />}>
+              {counts.online} online
+            </Chip>
+            <Chip variant="danger" icon={<ChipIcon glyph="cross" />}>
+              {counts.streamDown} stream down
+            </Chip>
+            {counts.degraded > 0 ? (
+              <Chip variant="warn" icon={<ChipIcon glyph="alert" />}>
+                {counts.degraded} degraded
+              </Chip>
+            ) : null}
+            {counts.disabled > 0 ? (
+              <Chip variant="neutral" icon={<ChipIcon glyph="circle" />}>
+                {counts.disabled} disabled
+              </Chip>
+            ) : null}
+          </div>
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-fg-muted">
@@ -429,9 +479,14 @@ export const CamerasSection = () => {
                     </td>
                     <td className="px-4 py-2 tabular-nums text-fg-muted">{camera.sample_rate_fps} fps</td>
                     <td className="px-4 py-2">
-                      <Chip variant={presentation.variant} icon={<ChipIcon glyph={presentation.glyph} />}>
-                        {presentation.label}
-                      </Chip>
+                      <div className="flex flex-col gap-0.5">
+                        <Chip variant={presentation.variant} icon={<ChipIcon glyph={presentation.glyph} />}>
+                          {presentation.label}
+                        </Chip>
+                        {statusDetail(camera.status) !== null ? (
+                          <span className="text-xs text-fg-muted">{statusDetail(camera.status)}</span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-4 py-2">
                       <Chip variant="neutral" icon={<ChipIcon glyph="lock" />}>
@@ -461,7 +516,9 @@ export const CamerasSection = () => {
               })}
             </tbody>
           </table>
-        )}
+          </>
+          );
+        }}
       </ConfigSection>
       {pending !== null ? (
         <RegisterCameraDialog

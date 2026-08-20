@@ -49,7 +49,11 @@ from typing import Callable, Iterator, Protocol, runtime_checkable
 
 from guardian_lens_edge.config import AgentConfig, CameraConfig
 from guardian_lens_edge.frames import Frame
-from guardian_lens_edge.rtsp import RtspSource, StreamStatusListener
+from guardian_lens_edge.rtsp import (
+    RtspSource,
+    StreamStatusListener,
+    diagnose_rtsp_open_failure,
+)
 from guardian_lens_edge.state import STREAM_LOST_REASON, GapRecorder
 from guardian_lens_edge.unsealer import (
     CredentialUnsealError,
@@ -358,6 +362,7 @@ class MultiCameraSource:
             sample_rate_fps=spec.sample_rate_fps,
             decode_failure_threshold=self._decode_failure_threshold,
             listener=listener,
+            open_diagnoser=diagnose_rtsp_open_failure,
         )
 
     def _stop_camera(self, camera_id: str) -> None:

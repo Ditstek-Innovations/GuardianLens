@@ -12,6 +12,7 @@ import { flattenQueueItems, useQueueQuery } from '../api/useQueueQuery';
 import { useIncidentsQuery } from '../api/useIncidentsQuery';
 import { IncidentRow } from './IncidentRow';
 import { QueueList } from './QueueList';
+import { WhyNotReviewPanel } from './WhyNotReviewPanel';
 
 import type { ReactNode } from 'react';
 import type { IncidentGroup } from '@/lib/api/types';
@@ -44,6 +45,9 @@ export const QueuePage = () => {
   const queueDepth = isIncidentView
     ? incidentsQuery.data?.queue_depth
     : query.data?.pages[0]?.queue_depth;
+  const whyNotReview = isIncidentView
+    ? (incidentsQuery.data?.why_not_review ?? [])
+    : (query.data?.pages[0]?.why_not_review ?? []);
 
   // Opening an incident starts one-by-one review of its members: the detail
   // page advances through these ids, each decided individually (BR-V-02).
@@ -145,7 +149,7 @@ export const QueuePage = () => {
     content = (
       <EmptyState
         title="Queue clear — nothing awaits review"
-        detail="No unverified candidates are waiting. A detection becomes a review item only after an edge agent authenticates to this tenant, a frame matches an active rule's class, and ingest succeeds. Configuration shows agents, rules and detection models."
+        detail="No unverified candidates are waiting. The panel above lists each camera and why its last frames did not enter Review."
       />
     );
   } else if (isIncidentView) {
@@ -243,6 +247,7 @@ export const QueuePage = () => {
           </Chip>
         </div>
       </header>
+      <WhyNotReviewPanel rows={whyNotReview} />
       {content}
     </section>
   );

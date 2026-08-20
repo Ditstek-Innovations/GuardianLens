@@ -23,6 +23,7 @@ from guardian_lens.api.dependencies.tenant import get_tenant_context
 from guardian_lens.api.routes.ingest import raw_json_body
 from guardian_lens.core.errors import NotFoundError
 from guardian_lens.core.principal import HumanPrincipal
+from guardian_lens.repositories.config import ConfigRepository
 from guardian_lens.repositories.events import EventRepository, sessionize
 from guardian_lens.repositories.evidence import EvidenceStore
 from guardian_lens.schemas.events import (
@@ -36,6 +37,7 @@ from guardian_lens.schemas.events import (
     QueueResponse,
     QueueRule,
     QueueZone,
+    ReviewBlockItem,
 )
 from guardian_lens.services.audit import AuditService
 from guardian_lens.services.decision import DecisionService
@@ -43,6 +45,11 @@ from guardian_lens.repositories.audit import AuditRepository
 from guardian_lens.tenancy.context import TenantContext
 
 router = APIRouter(tags=["review"])
+
+
+def _why_not_review(context: TenantContext, site_ids: list) -> list[ReviewBlockItem]:
+    rows = ConfigRepository(context.session).review_block_for_sites(site_ids)
+    return [ReviewBlockItem.model_validate(row) for row in rows]
 
 
 def _evidence_url(event_pk: UUID, evidence_state: str) -> str | None:
@@ -106,6 +113,7 @@ def list_events(
         ],
         queue_depth=depth,
         next_cursor=next_cursor,
+        why_not_review=_why_not_review(context, list(principal.site_ids())),
     )
 
 
@@ -165,6 +173,7 @@ def list_incidents(
         queue_depth=depth,
         gap_seconds=gap_seconds,
         capped=capped,
+        why_not_review=_why_not_review(context, list(principal.site_ids())),
     )
 
 

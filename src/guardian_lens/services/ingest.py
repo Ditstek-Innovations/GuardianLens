@@ -152,6 +152,7 @@ class EventIngestService:
         sent_at: datetime,
         applied_config_version: int | None,
         agent_version: str | None,
+        review_block: list[dict] | None = None,
     ) -> int:
         """Apply a health beat; returns the measured clock skew.
 
@@ -166,6 +167,7 @@ class EventIngestService:
             clock_skew_ms=skew_ms,
             applied_config_version=applied_config_version,
             agent_version=agent_version,
+            review_block=review_block,
         )
         self._session.commit()
         return skew_ms

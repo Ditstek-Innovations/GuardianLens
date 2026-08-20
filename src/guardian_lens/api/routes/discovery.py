@@ -23,13 +23,16 @@ from guardian_lens.repositories.camera_discovery import (
     CameraDiscoveryRepository,
 )
 from guardian_lens.schemas.config import (
-    CameraCreate,
+    CameraDiscoveryBulkImportResponse,
     CameraDiscoveryCandidateResponse,
     CameraDiscoveryImportRequest,
     CameraResponse,
     DiscoveryScanResponse,
 )
-from guardian_lens.services.camera_discovery import RTSPProbeService
+from guardian_lens.services.camera_discovery import (
+    RTSPProbeService,
+    camera_rtsp_url,
+)
 from guardian_lens.services.configuration import ConfigurationService
 from guardian_lens.repositories.audit import AuditRepository
 from guardian_lens.services.audit import AuditService
@@ -50,6 +53,67 @@ def _config_service(
 
 def _ip(request: Request) -> str | None:
     return request.client.host if request.client else None
+
+
+_FULL_FRAME = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
+_AUTH_REQUIRED_RESOLUTION = "Unknown (Auth Required)"
+
+
+def _candidate_needs_login(candidate: dict) -> bool:
+    return (candidate.get("resolution") or "") == _AUTH_REQUIRED_RESOLUTION
+
+
+def _adopt_candidate(
+    *,
+    candidate: dict,
+    name: str,
+    location_description: str | None,
+    stream_profile: str,
+    sample_rate_fps: float,
+    rtsp_path: str | None,
+    request: Request,
+    context: TenantContext,
+    principal: HumanPrincipal,
+    rtsp_username: str | None = None,
+    rtsp_password: str | None = None,
+) -> Any:
+    """Seal the candidate's IP/path (and optional camera login) as the stream URL."""
+    path = rtsp_path or candidate.get("default_rtsp_path")
+    if not path:
+        raise HTTPException(status_code=400, detail="No RTSP path selected")
+    try:
+        stream_url = camera_rtsp_url(
+            candidate["ip_address"],
+            candidate["port"],
+            path,
+            username=rtsp_username,
+            password=rtsp_password,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    config_service = _config_service(request, context)
+    camera_row = config_service.create_camera(
+        principal=principal,
+        site_id=candidate["site_id"],
+        name=name,
+        stream_url=stream_url,
+        location_description=location_description,
+        stream_profile=stream_profile,
+        sample_rate_fps=sample_rate_fps,
+        ip_address=_ip(request),
+    )
+    config_service.create_zone(
+        principal=principal,
+        camera_id=camera_row.id,
+        name=f"{name} zone",
+        polygon=_FULL_FRAME,
+        ip_address=_ip(request),
+    )
+    CameraDiscoveryRepository(context.session).mark_candidate_imported(
+        candidate["id"], camera_row.id
+    )
+    context.session.commit()
+    return camera_row
 
 
 @router.post("/scan", response_model=DiscoveryScanResponse, status_code=202)
@@ -242,35 +306,71 @@ async def import_candidate(
 
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
+    if candidate.get("imported_at") is not None:
+        raise HTTPException(status_code=409, detail="Candidate already imported")
 
-    # Use selected RTSP path or default
-    rtsp_path = body.rtsp_path or candidate["default_rtsp_path"]
-    if not rtsp_path:
-        raise HTTPException(
-            status_code=400, detail="No RTSP path selected"
-        )
-
-    # Construct stream URL
-    stream_url = f"rtsp://{candidate['ip_address']}:{candidate['port']}/{rtsp_path}"
-
-    # Create camera using configuration service
-    config_service = _config_service(request, context)
-    camera_row = config_service.create_camera(
-        principal=principal,
-        site_id=candidate["site_id"],
+    camera_row = _adopt_candidate(
+        candidate=candidate,
         name=body.name,
-        stream_url=stream_url,
         location_description=body.location_description,
         stream_profile=body.stream_profile,
         sample_rate_fps=body.sample_rate_fps,
-        ip_address=_ip(request),
+        rtsp_path=body.rtsp_path,
+        rtsp_username=body.rtsp_username,
+        rtsp_password=body.rtsp_password,
+        request=request,
+        context=context,
+        principal=principal,
     )
-
-    # Mark candidate as imported
-    repo.mark_candidate_imported(candidate_id, camera_row.id)
-    context.session.commit()
-
     return CameraResponse.model_validate(camera_row._mapping)
+
+
+@router.post(
+    "/candidates/adopt-pending",
+    response_model=CameraDiscoveryBulkImportResponse,
+)
+async def import_pending_candidates(
+    site_id: UUID,
+    request: Request,
+    principal: HumanPrincipal = Depends(require_site_admin),
+    context: TenantContext = Depends(get_tenant_context),
+) -> CameraDiscoveryBulkImportResponse:
+    """Register every scanned camera that answers without a camera login.
+
+    Candidates the probe marked as 401/auth-required are skipped — this
+    product does not store camera passwords from discovery.
+    """
+    repo = CameraDiscoveryRepository(context.session)
+    pending = [
+        row
+        for row in repo.get_candidates(site_id)
+        if row.get("imported_at") is None and row.get("status") != "imported"
+    ]
+    skipped_auth = 0
+    imported = 0
+    already = 0
+    for candidate in pending:
+        if _candidate_needs_login(candidate):
+            skipped_auth += 1
+            continue
+        name = f"{candidate.get('model') or 'Camera'} - {candidate['ip_address']}"
+        _adopt_candidate(
+            candidate=candidate,
+            name=name,
+            location_description=None,
+            stream_profile="secondary",
+            sample_rate_fps=2.0,
+            rtsp_path=None,
+            request=request,
+            context=context,
+            principal=principal,
+        )
+        imported += 1
+    return CameraDiscoveryBulkImportResponse(
+        imported_count=imported,
+        skipped_auth_required=skipped_auth,
+        skipped_already_imported=already,
+    )
 
 
 @router.delete("/candidates/{candidate_id}", status_code=204)

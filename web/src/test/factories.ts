@@ -44,11 +44,13 @@ export const makeIncidentGroup = (overrides: Partial<IncidentGroup> = {}): Incid
 export const makeIncidentsResponse = (
   incidents: IncidentGroup[],
   queueDepth: number = incidents.reduce((sum, group) => sum + group.count, 0),
+  whyNotReview: IncidentQueueResponse['why_not_review'] = [],
 ): IncidentQueueResponse => ({
   incidents,
   queue_depth: queueDepth,
   gap_seconds: 300,
   capped: false,
+  why_not_review: whyNotReview,
 });
 
 export const jsonResponse = (body: unknown, status = 200): Response =>

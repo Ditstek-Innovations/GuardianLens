@@ -260,3 +260,14 @@ class CameraDiscoveryImportRequest(BaseModel):
     rtsp_path: str | None = Field(
         default=None, min_length=1, max_length=255
     )  # If None, use default_rtsp_path
+    # Optional camera firmware login. Sealed into stream_url; never returned.
+    rtsp_username: str | None = Field(default=None, min_length=1, max_length=128)
+    rtsp_password: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class CameraDiscoveryBulkImportResponse(BaseModel):
+    """Scan → register, no camera login: how many open streams were adopted."""
+
+    imported_count: int
+    skipped_auth_required: int
+    skipped_already_imported: int

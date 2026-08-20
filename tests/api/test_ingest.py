@@ -172,6 +172,55 @@ def test_agent_health_updates_agent_row(client, api_seed, agent_token, tenant_co
     assert row[3] == "active"
 
 
+def test_agent_health_review_block_surfaces_on_queue(
+    client, api_seed, agent_token, reviewer_token, tenant_conn
+):
+    """Miss reasons ride the health beat so Review can show why it is empty."""
+    camera_id = str(api_seed["camera_a"])
+    reason = (
+        "rule 'Mobile uses' watches 'cell phone'; frame classes: person"
+    )
+    response = client.post(
+        "/api/v1/agents/health",
+        json={
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "applied_config_version": 3,
+            "agent_version": "0.9.1",
+            "review_block": [
+                {
+                    "camera_id": camera_id,
+                    "stream": "online",
+                    "last_seen_classes": ["person"],
+                    "watched_classes": ["cell phone"],
+                    "why_not_review": [reason],
+                    "matched": False,
+                    "observed_at": datetime.now(timezone.utc).isoformat(),
+                }
+            ],
+        },
+        headers=bearer(agent_token),
+    )
+    assert response.status_code == 200
+    stored = tenant_conn.execute(
+        "SELECT review_block FROM agents WHERE id = %s",
+        (api_seed["agent_a"],),
+    ).fetchone()
+    assert stored is not None and stored[0]
+    queue = client.get("/api/v1/events", headers=bearer(reviewer_token))
+    assert queue.status_code == 200
+    why = queue.json()["why_not_review"]
+    assert why[0]["camera_id"] == camera_id
+    assert why[0]["camera_name"] == "camera_a entrance"
+    assert why[0]["why_not_review"] == [reason]
+    incidents = client.get(
+        "/api/v1/events/incidents", headers=bearer(reviewer_token)
+    )
+    assert incidents.status_code == 200
+    assert incidents.json()["why_not_review"][0]["watched_classes"] == [
+        "cell phone"
+    ]
+
+
 def test_agent_health_rejects_human_token(client, admin_token):
     response = client.post(
         "/api/v1/agents/health",

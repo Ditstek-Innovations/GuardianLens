@@ -7,6 +7,8 @@ one that works in migrations and fails in the application, or vice versa.
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import pytest
 
 from guardian_lens.db.urls import (
@@ -18,6 +20,7 @@ from guardian_lens.db.urls import (
     tenant_url,
     with_database,
 )
+from guardian_lens.services.camera_discovery import anonymous_rtsp_url
 
 BASE = "postgresql+psycopg://u:p@host:5432/gl_tenant_pilot"
 
@@ -103,3 +106,26 @@ def test_validator_matches_the_database_constraint():
     from guardian_lens.db.urls import SLUG_PATTERN
 
     assert SLUG_PATTERN.pattern == r"^[a-z0-9][a-z0-9_-]*$"
+
+
+def test_anonymous_rtsp_url_is_a_parseable_rtsp_uri():
+    url = anonymous_rtsp_url("192.168.0.19", 554, "stream1")
+    parts = urlsplit(url)
+    assert parts.scheme == "rtsp"
+    assert parts.hostname == "192.168.0.19"
+    assert parts.port == 554
+    assert parts.path == "/stream1"
+    assert parts.username is None
+
+
+def test_camera_rtsp_url_embeds_login_when_provided():
+    from guardian_lens.services.camera_discovery import camera_rtsp_url
+
+    url = camera_rtsp_url(
+        "192.168.0.19", 554, "stream2", username="cam", password="secret"
+    )
+    parts = urlsplit(url)
+    assert parts.hostname == "192.168.0.19"
+    assert parts.path == "/stream2"
+    assert parts.username == "cam"
+    assert parts.password == "secret"

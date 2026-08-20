@@ -40,10 +40,12 @@ and ``repr(RtspSource)`` redacts it (see ``unsealer.UnsealedStreamUrl``).
 from __future__ import annotations
 
 import logging
+import subprocess
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Callable, Iterator, Protocol
+from urllib.parse import urlsplit
 
 from guardian_lens_edge.frames import Frame
 from guardian_lens_edge.unsealer import UnsealedStreamUrl
@@ -52,6 +54,8 @@ __all__ = [
     "CaptureLike",
     "RtspSource",
     "StreamStatusListener",
+    "diagnose_rtsp_open_failure",
+    "redacted_rtsp_target",
 ]
 
 logger = logging.getLogger(__name__)
@@ -105,6 +109,82 @@ class StreamStatusListener(Protocol):
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def redacted_rtsp_target(url: str) -> str:
+    """Host/path only — never userinfo. Safe for logs."""
+    parts = urlsplit(url)
+    if not parts.hostname:
+        return "unparseable RTSP URL (missing host; need rtsp://ip:port/path)"
+    port = f":{parts.port}" if parts.port is not None else ""
+    path = parts.path or "/"
+    kind = "with camera login" if parts.username else "no camera login"
+    scheme = parts.scheme or "rtsp"
+    return f"{scheme}://{parts.hostname}{port}{path} ({kind})"
+
+
+def _scrub_secrets(text: str, url: str) -> str:
+    parts = urlsplit(url)
+    cleaned = text.replace(url, "<stream>")
+    if parts.password:
+        cleaned = cleaned.replace(parts.password, "***")
+    if parts.username:
+        cleaned = cleaned.replace(parts.username, "***")
+    return cleaned
+
+
+def diagnose_rtsp_open_failure(url: str) -> str:
+    """Ask ffmpeg why OpenCV could not open the stream. Never returns the URL."""
+    try:
+        proc = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-rtsp_transport",
+                "tcp",
+                "-stimeout",
+                "3000000",
+                "-i",
+                url,
+                "-frames:v",
+                "1",
+                "-f",
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except FileNotFoundError:
+        return "OpenCV could not open the stream (ffmpeg not installed for a detailed reason)"
+    except subprocess.TimeoutExpired:
+        return "RTSP timed out — camera did not deliver a frame"
+    raw = _scrub_secrets((proc.stderr or "") + (proc.stdout or ""), url)
+    lowered = raw.lower()
+    if "401" in raw or "unauthorized" in lowered:
+        return (
+            "camera returned 401 Unauthorized — this URL has no working login; "
+            "enable anonymous RTSP on the camera or replace the stored URL with one that includes credentials"
+        )
+    if "403" in raw or "forbidden" in lowered:
+        return "camera returned 403 Forbidden"
+    if "404" in raw or "not found" in lowered:
+        return "camera returned 404 — RTSP path is wrong (try stream1/stream2)"
+    if "no route" in lowered or "network is unreachable" in lowered:
+        return "no route to host — camera IP is not reachable from this machine"
+    if "connection refused" in lowered:
+        return "connection refused — nothing is listening on that RTSP port"
+    if "timed out" in lowered or "timeout" in lowered:
+        return "connection timed out — camera did not answer"
+    if "no such file" in lowered:
+        return "unparseable stream URL (missing rtsp://host/path)"
+    line = next((part.strip() for part in raw.splitlines() if part.strip()), "")
+    if line:
+        return line[:300]
+    return "OpenCV could not open the stream"
 
 
 def _default_capture_factory(url: str) -> CaptureLike:
@@ -162,6 +242,7 @@ class RtspSource:
         sleep: Callable[[float], None] | None = None,
         backoff_base_seconds: float = 1.0,
         backoff_cap_seconds: float = 60.0,
+        open_diagnoser: Callable[[str], str] | None = None,
     ) -> None:
         if sample_rate_fps <= 0:
             raise ValueError("sample_rate_fps must be positive")
@@ -185,6 +266,7 @@ class RtspSource:
         self._sleep = sleep or self._stop_event.wait
         self._backoff_base = backoff_base_seconds
         self._backoff_cap = backoff_cap_seconds
+        self._open_diagnoser = open_diagnoser
         # Counters and state, readable by wiring/health.
         self._decode_errors_total = 0
         self._consecutive_decode_failures = 0
@@ -264,6 +346,13 @@ class RtspSource:
                 return capture
             capture.release()
             self._report_loss_once()
+            if self._backoff_attempt == 0 and self._open_diagnoser is not None:
+                logger.warning(
+                    "camera %s: connect failed targeting %s — %s",
+                    self._camera_id,
+                    redacted_rtsp_target(self._stream_url.reveal()),
+                    self._open_diagnoser(self._stream_url.reveal()),
+                )
             self._backoff_sleep("connect failed")
         return None
 
@@ -274,9 +363,10 @@ class RtspSource:
         )
         self._backoff_attempt += 1
         logger.warning(
-            "camera %s: %s (attempt %d), retrying in %.0fs",
+            "camera %s: %s targeting %s (attempt %d), retrying in %.0fs",
             self._camera_id,
             why,
+            redacted_rtsp_target(self._stream_url.reveal()),
             self._backoff_attempt,
             delay,
         )

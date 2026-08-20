@@ -34,6 +34,7 @@ export const useCamerasQuery = (enabled: boolean = true) =>
         }),
       ),
     enabled,
+    refetchInterval: 10_000,
   });
 
 export const useZonesQuery = () =>

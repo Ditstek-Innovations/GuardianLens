@@ -65,6 +65,18 @@ def test_camera_response_and_storage_never_contain_stream_url(
     assert b"secret-cam-password" not in bytes(stored)
 
 
+def test_camera_create_rejects_rtsp_url_without_host(
+    client, api_seed, admin_token
+):
+    """rtsp:192.168.0.20 (missing //) cannot be opened by FFmpeg."""
+    response = _create_camera(
+        client, api_seed, admin_token, stream_url="rtsp:10.11.12.13"
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["field"] == "stream_url"
+    assert "10.11.12.13" not in response.text
+
+
 @pytest.mark.active_rule("BR-010")
 def test_camera_audit_entry_never_contains_credential(
     client, api_seed, admin_token, tenant_conn

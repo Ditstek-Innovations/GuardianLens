@@ -43,7 +43,7 @@ from guardian_lens_edge.multicamera import (
 from guardian_lens_edge.publisher import Publisher, PublishReport
 from guardian_lens_edge.rules import RuleEvaluator
 from guardian_lens_edge.scenario import Scenario
-from guardian_lens_edge.state import AgentStateMachine, GapRecorder
+from guardian_lens_edge.state import AgentStateMachine, GapRecorder, STREAM_LOST_REASON
 from guardian_lens_edge.store import EdgeStore
 from guardian_lens_edge.unsealer import (
     CAMERA_KEY_ENV,
@@ -94,6 +94,7 @@ class EdgeAgent:
         self._state = state
         self._agent_id = agent_id
         self._site_id = site_id
+        self._review_block: dict[str, dict[str, object]] = {}
 
     @property
     def state(self) -> AgentStateMachine:
@@ -173,11 +174,12 @@ class EdgeAgent:
         watched: set[str] = set()
         applied = self._config_sync.applied
         if applied is not None:
-            watched = {
-                rule.detection_class
-                for rule in applied.rules
-                if rule.is_active
-            }
+            for rule in applied.rules:
+                if not rule.is_active:
+                    continue
+                zone = applied.zone_by_id(rule.zone_id)
+                if zone is not None and zone.camera_id == frame.camera_id:
+                    watched.add(rule.detection_class)
         seen_watched = any(item.class_name in watched for item in detections)
         if candidates:
             logger.info(
@@ -199,6 +201,17 @@ class EdgeAgent:
                 sorted(watched) or ["(none)"],
                 misses,
             )
+        self._remember_review_block(
+            camera_id=frame.camera_id,
+            stream="online",
+            seen=sorted({item.class_name for item in detections}),
+            watched=sorted(watched),
+            why=[] if candidates else (self._evaluator.last_misses or [
+                "frame did not match an active rule"
+            ]),
+            matched=bool(candidates),
+            observed_at=iso_utc(now),
+        )
         event_ids: list[str] = []
         for candidate in candidates:
             event_ids.append(
@@ -239,6 +252,7 @@ class EdgeAgent:
             "sent_at": iso_utc(now),
             "applied_config_version": self._config_sync.applied_version,
             "agent_version": EDGE_VERSION,
+            "review_block": self._health_review_block(),
         }
         self._store.enqueue_health(
             payload,
@@ -345,6 +359,59 @@ class EdgeAgent:
         logger.warning("frame image missing, spooling placeholder: %s",
                        frame.image_ref)
         return None
+
+    def _remember_review_block(
+        self,
+        *,
+        camera_id: str,
+        stream: str,
+        seen: list[str],
+        watched: list[str],
+        why: list[str],
+        matched: bool,
+        observed_at: str,
+    ) -> None:
+        self._review_block[camera_id] = {
+            "camera_id": camera_id,
+            "stream": stream,
+            "last_seen_classes": seen[:24],
+            "watched_classes": watched[:24],
+            "why_not_review": [str(item)[:300] for item in why[:8]],
+            "matched": matched,
+            "observed_at": observed_at,
+        }
+
+    def _health_review_block(self) -> list[dict[str, object]]:
+        lost = {
+            gap.camera_id
+            for gap in self._store.open_gaps()
+            if gap.reason == STREAM_LOST_REASON and gap.camera_id
+        }
+        applied = self._config_sync.applied
+        camera_ids: list[str] = []
+        if applied is not None:
+            camera_ids = list(applied.camera_ids())
+        elif self._review_block:
+            camera_ids = list(self._review_block)
+        payload: list[dict[str, object]] = []
+        for camera_id in camera_ids:
+            row = dict(self._review_block.get(camera_id) or {})
+            if camera_id in lost or not row:
+                row.update(
+                    {
+                        "camera_id": camera_id,
+                        "stream": "down",
+                        "last_seen_classes": row.get("last_seen_classes") or [],
+                        "watched_classes": row.get("watched_classes") or [],
+                        "why_not_review": [
+                            "Stream down — no frames, so nothing can enter Review"
+                        ],
+                        "matched": False,
+                        "observed_at": row.get("observed_at"),
+                    }
+                )
+            payload.append(row)
+        return payload
 
 
 def _utc_now() -> datetime:

@@ -46,7 +46,10 @@ export function CameraDiscovery() {
   const [importName, setImportName] = useState('');
   const [importLocation, setImportLocation] = useState('');
   const [importRtspPath, setImportRtspPath] = useState('');
+  const [importRtspUser, setImportRtspUser] = useState('');
+  const [importRtspPassword, setImportRtspPassword] = useState('');
   const [importing, setImporting] = useState(false);
+  const [importingAll, setImportingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -114,11 +117,42 @@ export function CameraDiscovery() {
     }
   }, [siteId]);
 
+  const pendingCount = candidates.filter(
+    (camera) => camera.imported_at === null && camera.resolution !== 'Unknown (Auth Required)',
+  ).length;
+
+  const handleImportAll = useCallback(async () => {
+    if (!siteId) return;
+    setImportingAll(true);
+    setError(null);
+    try {
+      const result = await apiClient.post<{
+        imported_count: number;
+        skipped_auth_required: number;
+      }>('/api/v1/discovery/candidates/adopt-pending', undefined, {
+        query: { site_id: siteId },
+      });
+      setSuccess(
+        `Imported ${result.imported_count} camera(s)` +
+          (result.skipped_auth_required > 0
+            ? `. Skipped ${result.skipped_auth_required} that need a camera login — import those one-by-one with username and password.`
+            : '.'),
+      );
+      await fetchCandidates();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to import cameras');
+    } finally {
+      setImportingAll(false);
+    }
+  }, [siteId, fetchCandidates]);
+
   const handleImportClick = (candidate: DiscoveredCamera) => {
     setSelectedCandidate(candidate);
     setImportName(`${candidate.model || 'Camera'} - ${candidate.ip_address}`);
     setImportLocation('');
     setImportRtspPath(candidate.default_rtsp_path || '');
+    setImportRtspUser('');
+    setImportRtspPassword('');
     setShowImportModal(true);
   };
 
@@ -141,6 +175,9 @@ export function CameraDiscovery() {
           stream_profile: 'secondary',
           sample_rate_fps: 2.0,
           rtsp_path: importRtspPath,
+          ...(importRtspUser.trim() !== '' && importRtspPassword !== ''
+            ? { rtsp_username: importRtspUser.trim(), rtsp_password: importRtspPassword }
+            : {}),
         }
       );
 
@@ -154,7 +191,7 @@ export function CameraDiscovery() {
     } finally {
       setImporting(false);
     }
-  }, [selectedCandidate, importName, importLocation, importRtspPath, fetchCandidates]);
+  }, [selectedCandidate, importName, importLocation, importRtspPath, importRtspUser, importRtspPassword, fetchCandidates]);
 
   const handleDiscard = useCallback(
     async (candidateId: string) => {
@@ -241,10 +278,25 @@ export function CameraDiscovery() {
 
       {/* Candidates List */}
       <div className="rounded-lg border border-gray-200 bg-white overflow-hidden shadow-sm">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Discovered Cameras ({candidates.length})
-          </h2>
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Discovered Cameras ({candidates.length})
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Import uses an open RTSP URL (no camera login): rtsp://ip:port/path. Streams that
+              answered 401 are skipped.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleImportAll()}
+            disabled={importingAll || pendingCount === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors text-sm"
+          >
+            <Plus className="w-4 h-4" />
+            {importingAll ? 'Importing…' : `Import all (${pendingCount})`}
+          </button>
         </div>
 
         {candidates.length === 0 ? (
@@ -316,7 +368,15 @@ export function CameraDiscovery() {
                   <div className="flex gap-2 ml-4">
                     <button
                       onClick={() => handleImportClick(camera)}
-                      disabled={camera.imported_at !== null}
+                      disabled={
+                        camera.imported_at !== null ||
+                        camera.resolution === 'Unknown (Auth Required)'
+                      }
+                      title={
+                        camera.resolution === 'Unknown (Auth Required)'
+                          ? 'This stream returned 401 — open RTSP is not available'
+                          : undefined
+                      }
                       className="flex items-center gap-1 px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-300 transition-colors text-sm"
                     >
                       <Plus className="w-4 h-4" />
@@ -388,10 +448,35 @@ export function CameraDiscovery() {
                 </select>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Camera login (if the stream returns 401)
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={importRtspUser}
+                    onChange={(e) => setImportRtspUser(e.target.value)}
+                    placeholder="Username"
+                    autoComplete="off"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <input
+                    type="password"
+                    value={importRtspPassword}
+                    onChange={(e) => setImportRtspPassword(e.target.value)}
+                    placeholder="Password"
+                    autoComplete="new-password"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-                <strong>Stream URL:</strong><br />
-                rtsp://{selectedCandidate.ip_address}:{selectedCandidate.port}
-                {importRtspPath ? `/${importRtspPath}` : '/<path>'}
+                <strong>This camera’s stream URL</strong> (sealed on import; the edge uses this, not a shared static URL):<br />
+                  rtsp://{importRtspUser.trim() !== '' ? `${importRtspUser.trim()}:••••@` : ''}
+                  {selectedCandidate.ip_address}:{selectedCandidate.port}
+                  {importRtspPath ? `/${importRtspPath}` : '/<path>'}
               </div>
             </div>
 

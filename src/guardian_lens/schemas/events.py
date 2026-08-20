@@ -43,6 +43,20 @@ class IngestResponse(BaseModel):
     received_at: datetime
 
 
+class CameraReviewBlock(BaseModel):
+    """Why this camera has not produced a Review item (latest sample)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    camera_id: UUID
+    stream: Literal["online", "down"]
+    last_seen_classes: list[str] = Field(default_factory=list, max_length=24)
+    watched_classes: list[str] = Field(default_factory=list, max_length=24)
+    why_not_review: list[str] = Field(default_factory=list, max_length=8)
+    matched: bool = False
+    observed_at: datetime | None = None
+
+
 class AgentHealthRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -50,6 +64,22 @@ class AgentHealthRequest(BaseModel):
     sent_at: datetime
     applied_config_version: int | None = None
     agent_version: str | None = Field(default=None, max_length=40)
+    # Latest per-camera miss snapshot for the Review empty state. Optional
+    # so older agents keep working.
+    review_block: list[CameraReviewBlock] | None = Field(default=None, max_length=64)
+
+
+class ReviewBlockItem(BaseModel):
+    """Queue-facing copy of CameraReviewBlock plus the camera name."""
+
+    camera_id: UUID
+    camera_name: str
+    stream: str
+    last_seen_classes: list[str]
+    watched_classes: list[str]
+    why_not_review: list[str]
+    matched: bool
+    observed_at: datetime | None = None
 
 
 class AgentHealthResponse(BaseModel):
@@ -106,6 +136,7 @@ class QueueResponse(BaseModel):
     # request (TRD 10.4).
     queue_depth: int
     next_cursor: str | None
+    why_not_review: list[ReviewBlockItem] = Field(default_factory=list)
 
 
 class DecisionReviewer(BaseModel):
@@ -140,6 +171,7 @@ class IncidentQueueResponse(BaseModel):
     # True when the grouping scan hit its row cap: counts may be partial.
     # Surfaced, never silent.
     capped: bool
+    why_not_review: list[ReviewBlockItem] = Field(default_factory=list)
 
 
 class EventDetail(BaseModel):

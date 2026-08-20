@@ -400,3 +400,60 @@ def test_stop_interrupts_streaming_and_releases_the_capture() -> None:
     assert harness.source.stopped
     assert capture.released
     assert capture.grab_calls < 100  # it did not run the script out
+
+
+def test_redacted_rtsp_target_omits_userinfo() -> None:
+    from guardian_lens_edge.rtsp import redacted_rtsp_target
+
+    shown = redacted_rtsp_target("rtsp://user:secret@192.168.0.20:554/stream1")
+    assert "secret" not in shown
+    assert "user" not in shown
+    assert "192.168.0.20:554/stream1" in shown
+    assert "with camera login" in shown
+
+
+def test_redacted_rtsp_target_flags_missing_host() -> None:
+    from guardian_lens_edge.rtsp import redacted_rtsp_target
+
+    shown = redacted_rtsp_target("rtsp:192.168.0.20")
+    assert "missing host" in shown
+    assert "secret" not in shown
+
+
+def test_diagnose_maps_401_without_echoing_url() -> None:
+    from guardian_lens_edge import rtsp as rtsp_mod
+
+    class _Result:
+        stderr = "rtsp://user:pw@cam/stream1: Server returned 401 Unauthorized"
+        stdout = ""
+
+    def fake_run(*_args, **_kwargs):
+        return _Result()
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(rtsp_mod.subprocess, "run", fake_run)
+    try:
+        reason = rtsp_mod.diagnose_rtsp_open_failure(
+            "rtsp://user:pw@cam/stream1"
+        )
+    finally:
+        monkey.undo()
+    assert "401" in reason
+    assert "pw" not in reason
+    assert "user" not in reason
+
+
+def test_connect_failure_log_names_host_not_password(caplog) -> None:
+    failed = FakeCapture([], None, opened=False)
+    harness = Harness(
+        [failed],
+        stop_after_sleeps=1,
+    )
+    harness.source._open_diagnoser = lambda _url: "camera returned 401 Unauthorized"
+    failed._clock = harness.clock
+    with caplog.at_level("WARNING"):
+        harness.collect(max_frames=1)
+    text = "\n".join(record.getMessage() for record in caplog.records)
+    assert "pw" not in text
+    assert "camera.local" in text
+    assert "401" in text

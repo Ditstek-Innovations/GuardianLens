@@ -145,6 +145,50 @@ class ConfigRepository:
             return None
         return self.get_camera(camera_id)
 
+    def review_block_for_sites(self, site_ids: Sequence[UUID]) -> list[dict[str, Any]]:
+        """Hydrate the latest edge miss snapshot for Review UI.
+
+        Names come from cameras; the payload itself is written on health
+        beats and contains no stream URLs.
+        """
+        if not site_ids:
+            return []
+        names = {str(row.id): row.name for row in self.list_cameras(site_ids)}
+        blocks = self._session.execute(
+            sa.select(agents.c.review_block).where(
+                agents.c.site_id.in_(list(site_ids)),
+                agents.c.review_block.is_not(None),
+            )
+        ).all()
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for (payload,) in blocks:
+            if not isinstance(payload, list):
+                continue
+            for item in payload:
+                if not isinstance(item, dict):
+                    continue
+                camera_id = str(item.get("camera_id") or "")
+                if not camera_id or camera_id in seen or camera_id not in names:
+                    continue
+                seen.add(camera_id)
+                out.append(
+                    {
+                        "camera_id": camera_id,
+                        "camera_name": names[camera_id],
+                        "stream": item.get("stream") or "down",
+                        "last_seen_classes": list(item.get("last_seen_classes") or [])[
+                            :24
+                        ],
+                        "watched_classes": list(item.get("watched_classes") or [])[:24],
+                        "why_not_review": list(item.get("why_not_review") or [])[:8],
+                        "matched": bool(item.get("matched")),
+                        "observed_at": item.get("observed_at"),
+                    }
+                )
+        out.sort(key=lambda row: row["camera_name"])
+        return out
+
     # -- zones ---------------------------------------------------------------
 
     def insert_zone(self, values: dict[str, Any]) -> sa.Row:

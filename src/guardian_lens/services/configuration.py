@@ -22,6 +22,7 @@ from __future__ import annotations
 import secrets
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -45,6 +46,19 @@ __all__ = ["ConfigurationService"]
 
 _ZONE_NOT_FOUND = "zone not found"
 _RULE_NOT_FOUND = "rule not found"
+_RTSP_URL_INVALID = (
+    "Stream URL must be rtsp://host:port/path with a hostname "
+    "(the host must sit between // and the next /)."
+)
+
+
+def require_rtsp_stream_url(stream_url: str) -> None:
+    """Refuse URLs the RTSP client cannot parse. The message never echoes
+    the value — it may contain a camera login (BR-S-03)."""
+    parts = urlsplit(stream_url.strip())
+    if parts.scheme not in {"rtsp", "rtsps"} or not parts.hostname:
+        raise ValidationFailureError(_RTSP_URL_INVALID, field="stream_url")
+
 
 # Argon2id, the same scheme agent_login verifies against (services/identity).
 _credential_hasher = PasswordHasher()
@@ -117,6 +131,7 @@ class ConfigurationService:
         ip_address: str | None,
     ) -> sa.Row:
         self._ensure_site_scope(principal, site_id)
+        require_rtsp_stream_url(stream_url)
         # Seal immediately; the plaintext does not outlive this frame.
         sealed = self._sealer.seal(stream_url)
         camera = self._config.insert_camera(
@@ -167,6 +182,7 @@ class ConfigurationService:
         values = dict(changes)
         stream_url = values.pop("stream_url", None)
         if stream_url is not None:
+            require_rtsp_stream_url(stream_url)
             values["stream_url_encrypted"] = self._sealer.seal(stream_url)
             values["stream_url_key_id"] = self._sealer.key_id
         if not values and stream_url is None:

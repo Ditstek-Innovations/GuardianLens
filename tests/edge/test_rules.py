@@ -122,6 +122,23 @@ def test_confidence_exactly_at_threshold_passes() -> None:
     assert counters.calls == []
 
 
+def test_candidate_retains_triggering_model_version() -> None:
+    evaluator, _ = make_evaluator(confidence_threshold=0.5)
+    candidates = evaluator.evaluate(
+        make_frame(),
+        [
+            Detection(
+                class_name=HELMET_CLASS,
+                bbox_norm=INSIDE_BBOX,
+                confidence=0.9,
+                model_version="hardhat-1",
+            )
+        ],
+    )
+
+    assert candidates[0].model_version == "hardhat-1"
+
+
 def test_confidence_just_below_threshold_discards_and_counts() -> None:
     evaluator, counters = make_evaluator(confidence_threshold=0.5)
     candidates = evaluator.evaluate(

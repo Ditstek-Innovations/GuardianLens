@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
@@ -58,5 +58,48 @@ describe('HistoryPage', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Previous' }));
     expect(screen.getByText('Page 2 of 4 · 35 records')).toBeInTheDocument();
+  });
+
+  it('reads date-and-time filters from the URL and sends ISO timestamps to the API', async () => {
+    vi.mocked(useHistoryQuery).mockReturnValue({
+      data: { pages: [makeQueuePage([], 0)], pageParams: [undefined] },
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      isFetchingNextPage: false,
+    } as never);
+    const from = '2026-08-20T09:30';
+    const to = '2026-08-20T17:45';
+
+    render(
+      <MemoryRouter initialEntries={[`/history?status=accepted&from=${from}&to=${to}`]}>
+        <HistoryPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByLabelText('From date and time')).toHaveValue(from);
+    expect(screen.getByLabelText('To date and time')).toHaveValue(to);
+    expect(useHistoryQuery).toHaveBeenLastCalledWith(
+      'accepted',
+      new Date(from).toISOString(),
+      new Date(to).toISOString(),
+    );
+
+    const changedFrom = '2026-08-20T10:15';
+    fireEvent.change(screen.getByLabelText('From date and time'), {
+      target: { value: changedFrom },
+    });
+    expect(useHistoryQuery).toHaveBeenLastCalledWith(
+      'accepted',
+      new Date(changedFrom).toISOString(),
+      new Date(to).toISOString(),
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear dates' }));
+    expect(screen.getByLabelText('From date and time')).toHaveValue('');
+    expect(screen.getByLabelText('To date and time')).toHaveValue('');
+    expect(useHistoryQuery).toHaveBeenLastCalledWith('accepted', undefined, undefined);
   });
 });

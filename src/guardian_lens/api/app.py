@@ -27,6 +27,7 @@ from guardian_lens.api.routes import (
     discovery as discovery_routes,
     health as health_routes,
     ingest as ingest_routes,
+    live as live_routes,
     reports as reports_routes,
     review as review_routes,
 )
@@ -42,6 +43,7 @@ from guardian_lens.core.logging import (
 from guardian_lens.core.settings import Settings, load_settings
 from guardian_lens.repositories.evidence import FilesystemEvidenceStore
 from guardian_lens.services.identity import IdentityService
+from guardian_lens.services.live_preview import LivePreviewStore
 from guardian_lens.services.sealer import build_sealer
 from guardian_lens.services.self_service import SelfServiceAuthService
 from guardian_lens.services.tokens import TokenService
@@ -150,12 +152,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.reset_limiter = LoginRateLimiter(
         settings.password_reset_rate_limit, settings.login_rate_window_seconds
     )
+    app.state.live_preview_store = LivePreviewStore()
 
     # -- routes -------------------------------------------------------------
     prefix = "/api/v1"
     app.include_router(health_routes.router, prefix=prefix)
     app.include_router(auth_routes.router, prefix=prefix)
     app.include_router(ingest_routes.router, prefix=prefix)
+    app.include_router(live_routes.router, prefix=prefix)
     app.include_router(review_routes.router, prefix=prefix)
     app.include_router(reports_routes.router, prefix=prefix)
     app.include_router(config_routes.router, prefix=prefix)

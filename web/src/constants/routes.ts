@@ -7,6 +7,7 @@ export const ROUTES = {
   forgotPassword: '/forgot-password',
   resetPassword: '/reset-password',
   queue: '/queue',
+  liveFeeding: '/live-feeding',
   queueEvent: (eventId: string): string => `/queue/${eventId}`,
   history: '/history',
   reports: '/reports',

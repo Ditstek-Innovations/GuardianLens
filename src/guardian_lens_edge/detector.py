@@ -23,6 +23,7 @@ from guardian_lens_edge.frames import Frame
 from guardian_lens_edge.scenario import Scenario
 
 __all__ = [
+    "CompositeDetector",
     "Detection",
     "Detector",
     "ModelVerificationError",
@@ -41,6 +42,9 @@ class Detection:
     class_name: str
     bbox_norm: tuple[float, float, float, float]  # x1, y1, x2, y2 in 0-1
     confidence: float
+    # Filled when multiple models analyse one frame so the candidate retains
+    # the exact model that produced its triggering detection.
+    model_version: str | None = None
 
 
 class Detector(Protocol):
@@ -122,6 +126,38 @@ class NullDetector:
                 self._frames_seen,
             )
         return []
+
+
+class CompositeDetector:
+    """Run multiple verified detectors and retain per-detection provenance."""
+
+    def __init__(self, detectors: list[Detector]) -> None:
+        if len(detectors) < 2:
+            raise ValueError("CompositeDetector requires at least two detectors")
+        self._detectors = tuple(detectors)
+
+    @property
+    def model_version(self) -> str:
+        return "+".join(
+            version
+            for detector in self._detectors
+            if (version := detector.model_version) is not None
+        )
+
+    def detect(self, frame: Frame) -> list[Detection]:
+        detections: list[Detection] = []
+        for detector in self._detectors:
+            version = detector.model_version
+            detections.extend(
+                Detection(
+                    class_name=item.class_name,
+                    bbox_norm=item.bbox_norm,
+                    confidence=item.confidence,
+                    model_version=version,
+                )
+                for item in detector.detect(frame)
+            )
+        return detections
 
 
 class ModelVerificationError(Exception):

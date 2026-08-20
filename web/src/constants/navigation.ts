@@ -22,7 +22,7 @@ export const NAV_GROUP_ORDER: readonly { readonly id: NavGroup; readonly label: 
  * Icon identity per nav entry. The drawings live in the shell (inline SVG,
  * §12.1 — no icon font, no external asset); this file stays pure data.
  */
-export type NavIconName = 'queue' | 'history' | 'reports' | 'configuration' | 'audit';
+export type NavIconName = 'queue' | 'live' | 'history' | 'reports' | 'configuration' | 'audit';
 
 export interface NavItem {
   readonly path: string;
@@ -45,6 +45,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
     path: ROUTES.queue,
     label: 'Review queue',
     icon: 'queue',
+    group: NAV_GROUP.REVIEW,
+    roles: [ROLE.REVIEWER, ROLE.SAFETY_MANAGER, ROLE.SITE_ADMIN, ROLE.AUDITOR],
+  },
+  {
+    path: ROUTES.liveFeeding,
+    label: 'Live feeding',
+    icon: 'live',
     group: NAV_GROUP.REVIEW,
     roles: [ROLE.REVIEWER, ROLE.SAFETY_MANAGER, ROLE.SITE_ADMIN, ROLE.AUDITOR],
   },

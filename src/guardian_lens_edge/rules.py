@@ -79,6 +79,7 @@ class CandidateDecision:
     # The triggering detection's box (x1,y1,x2,y2 normalised) — carried so
     # the evidence frame can be annotated with WHAT fired and WHERE.
     bbox_norm: tuple[float, float, float, float] | None = None
+    model_version: str | None = None
 
 
 #: A person detection must itself be reasonably confident before it can
@@ -283,6 +284,7 @@ class RuleEvaluator:
         key = (frame.camera_id, zone.zone_id, rule.rule_id)
         best_confidence: float | None = None
         best_bbox: tuple[float, float, float, float] | None = None
+        best_model_version: str | None = None
         saw_class = False
         reject: str | None = None
         for detection in detections:
@@ -343,6 +345,7 @@ class RuleEvaluator:
             if best_confidence is None or detection.confidence > best_confidence:
                 best_confidence = detection.confidence
                 best_bbox = detection.bbox_norm
+                best_model_version = detection.model_version
 
         if best_confidence is None:
             # Condition not observed this sample: a dwell run, if any, is
@@ -401,4 +404,5 @@ class RuleEvaluator:
             occurred_at=frame.captured_at,
             frame=frame,
             bbox_norm=best_bbox,
+            model_version=best_model_version,
         ), None

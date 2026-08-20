@@ -3,7 +3,15 @@ import { Link, useSearchParams } from 'react-router-dom';
 
 import { PageHeading } from '@/components/layout/PageHeading';
 import { StatusChip } from '@/components/StatusChip';
-import { Button, EmptyState, ErrorState, FormField, Select, Skeleton } from '@/components/ui';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  FormField,
+  Input,
+  Select,
+  Skeleton,
+} from '@/components/ui';
 import { EVENT_STATUS } from '@/constants/events';
 import { ROUTES } from '@/constants/routes';
 import { usePageTitle } from '@/hooks/usePageTitle';
@@ -17,6 +25,7 @@ import type { ChangeEvent, ReactNode } from 'react';
 import type { EventStatus } from '@/constants/events';
 
 const VISIBLE_PAGE_SIZE = 10;
+const LOCAL_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
 const STATUS_OPTIONS: readonly {
   readonly value: EventStatus;
@@ -33,6 +42,14 @@ const STATUS_OPTIONS: readonly {
 const parseStatus = (value: string | null): EventStatus =>
   STATUS_OPTIONS.find((option) => option.value === value)?.value ?? EVENT_STATUS.ACCEPTED;
 
+const parseLocalDateTime = (value: string | null): string => {
+  if (value === null || !LOCAL_DATE_TIME_PATTERN.test(value)) return '';
+  return Number.isNaN(new Date(value).getTime()) ? '' : value;
+};
+
+const toIsoTimestamp = (value: string): string | undefined =>
+  value === '' ? undefined : new Date(value).toISOString();
+
 /**
  * SCR-4 Event History — every capture the edge reported, with its frame,
  * the moment it happened, the analysing model and its disposition. One
@@ -44,15 +61,43 @@ export const HistoryPage = () => {
   usePageTitle('Event history');
   const [searchParams, setSearchParams] = useSearchParams();
   const status = parseStatus(searchParams.get('status'));
-  const historyQuery = useHistoryQuery(status);
+  const from = parseLocalDateTime(searchParams.get('from'));
+  const to = parseLocalDateTime(searchParams.get('to'));
+  const historyQuery = useHistoryQuery(status, toIsoTimestamp(from), toIsoTimestamp(to));
   const [page, setPage] = useState(0);
 
-  const handleStatusChange = (event: ChangeEvent<HTMLSelectElement>): void => {
+  const updateFilter = (key: 'status' | 'from' | 'to', value: string): void => {
     setPage(0);
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
-        next.set('status', event.target.value);
+        if (value === '') next.delete(key);
+        else next.set(key, value);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  const handleStatusChange = (event: ChangeEvent<HTMLSelectElement>): void => {
+    updateFilter('status', event.target.value);
+  };
+
+  const handleFromChange = (event: ChangeEvent<HTMLInputElement>): void => {
+    updateFilter('from', event.target.value);
+  };
+
+  const handleToChange = (event: ChangeEvent<HTMLInputElement>): void => {
+    updateFilter('to', event.target.value);
+  };
+
+  const clearDateFilters = (): void => {
+    setPage(0);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete('from');
+        next.delete('to');
         return next;
       },
       { replace: true },
@@ -138,14 +183,14 @@ export const HistoryPage = () => {
                 <td className="px-4 py-2">
                   <Link
                     to={ROUTES.queueEvent(item.id)}
-                    aria-label={`Open capture of ${formatTimestamp(item.occurred_at)}`}
+                    aria-label={`Open capture of ${formatTimestamp(item.occurred_at, item.site_timezone)}`}
                     className="inline-block rounded-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
                   >
                     <EvidenceThumb evidenceUrl={item.evidence_url} eventId={item.id} />
                   </Link>
                 </td>
                 <td className="whitespace-nowrap px-4 py-2 tabular-nums text-fg">
-                  {formatTimestamp(item.occurred_at)}
+                  {formatTimestamp(item.occurred_at, item.site_timezone)}
                 </td>
                 <td className="px-4 py-2 text-fg-muted">
                   {item.camera.name} · {item.zone.name}
@@ -199,6 +244,27 @@ export const HistoryPage = () => {
             ))}
           </Select>
         </FormField>
+        <FormField label="From date and time" className="w-52">
+          <Input
+            type="datetime-local"
+            value={from}
+            max={to || undefined}
+            onChange={handleFromChange}
+          />
+        </FormField>
+        <FormField label="To date and time" className="w-52">
+          <Input
+            type="datetime-local"
+            value={to}
+            min={from || undefined}
+            onChange={handleToChange}
+          />
+        </FormField>
+        {from !== '' || to !== '' ? (
+          <Button variant="ghost" size="sm" className="mb-1" onClick={clearDateFilters}>
+            Clear dates
+          </Button>
+        ) : null}
         <p className="ml-auto pb-2.5 text-sm tabular-nums text-fg-muted">
           {historyQuery.data !== undefined
             ? `${total} ${statusLabel.toLowerCase()} capture(s) in total`

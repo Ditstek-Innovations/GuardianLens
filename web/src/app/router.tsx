@@ -8,6 +8,7 @@ import { ForgotPasswordPage, LoginPage, ResetPasswordPage, SignupPage } from '@/
 import { ConfigPage } from '@/features/config';
 import { EventDetailPage } from '@/features/event-detail';
 import { HistoryPage } from '@/features/event-history';
+import { LiveFeedingPage } from '@/features/live-feeding';
 import { QueuePage } from '@/features/review-queue';
 import { ReportsPage } from '@/features/reports';
 import { CameraDiscovery } from '@/features/cameras';
@@ -100,6 +101,7 @@ export const AppRouter = () => (
       {/* TRD §7.2 — the queue is home. */}
       <Route path="/" element={<Navigate to={ROUTES.queue} replace />} />
       <Route path={ROUTES.queue} element={<QueuePage />} />
+      <Route path={ROUTES.liveFeeding} element={<LiveFeedingPage />} />
       <Route path={ROUTE_PATTERNS.queueEvent} element={<EventDetailPage />} />
       {/* SCR-4 — every authenticated role reads history (§23.4). */}
       <Route path={ROUTES.history} element={<HistoryPage />} />

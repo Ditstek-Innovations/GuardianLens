@@ -57,6 +57,14 @@ const QueueIcon = () => (
   </svg>
 );
 
+const LiveIcon = () => (
+  <svg {...navIconProps}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="m10 9 5 3-5 3V9Z" />
+    <path d="M7 2.5h10" />
+  </svg>
+);
+
 const ReportsIcon = () => (
   <svg {...navIconProps}>
     <path d="M4 4v15a1 1 0 0 0 1 1h15" />
@@ -95,6 +103,7 @@ const HistoryIcon = () => (
 
 const NAV_ICONS: Record<NavIconName, () => ReactElement> = {
   queue: QueueIcon,
+  live: LiveIcon,
   history: HistoryIcon,
   reports: ReportsIcon,
   configuration: ConfigurationIcon,
@@ -242,10 +251,7 @@ const PrincipalMenu = ({
         </div>
       ) : null}
       {isConfirmingSignOut ? (
-        <SignOutDialog
-          onConfirm={onSignOut}
-          onCancel={() => setIsConfirmingSignOut(false)}
-        />
+        <SignOutDialog onConfirm={onSignOut} onCancel={() => setIsConfirmingSignOut(false)} />
       ) : null}
     </div>
   );
@@ -492,7 +498,9 @@ export const AppShell = () => {
             <button
               type="button"
               onClick={toggleReviewSound}
-              aria-label={isReviewSoundEnabled ? 'Mute new review sounds' : 'Enable new review sounds'}
+              aria-label={
+                isReviewSoundEnabled ? 'Mute new review sounds' : 'Enable new review sounds'
+              }
               aria-pressed={isReviewSoundEnabled}
               title={isReviewSoundEnabled ? 'New review sound is on' : 'New review sound is off'}
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"

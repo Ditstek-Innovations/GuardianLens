@@ -27,6 +27,7 @@ from guardian_lens_edge.auth import (
 )
 from guardian_lens_edge.config_sync import ConfigSync
 from guardian_lens_edge.detector import (
+    CompositeDetector,
     Detector,
     NullDetector,
     OnnxDetector,
@@ -41,6 +42,7 @@ from guardian_lens_edge.multicamera import (
     StreamGapRouter,
 )
 from guardian_lens_edge.publisher import Publisher, PublishReport
+from guardian_lens_edge.preview import PreviewPublisher
 from guardian_lens_edge.rules import RuleEvaluator
 from guardian_lens_edge.scenario import Scenario
 from guardian_lens_edge.state import AgentStateMachine, GapRecorder, STREAM_LOST_REASON
@@ -83,6 +85,7 @@ class EdgeAgent:
         state: AgentStateMachine,
         agent_id: str,
         site_id: str,
+        preview_publisher: PreviewPublisher | None = None,
     ) -> None:
         self._store = store
         self._frame_source = frame_source
@@ -94,6 +97,7 @@ class EdgeAgent:
         self._state = state
         self._agent_id = agent_id
         self._site_id = site_id
+        self._preview_publisher = preview_publisher
         self._review_block: dict[str, dict[str, object]] = {}
 
     @property
@@ -132,6 +136,8 @@ class EdgeAgent:
         """
         now = frame.captured_at
         jpeg_bytes = len(frame.image_bytes) if frame.image_bytes is not None else 0
+        if self._preview_publisher is not None:
+            self._preview_publisher.publish(frame)
         heartbeat = frame.sequence == 0 or frame.sequence % 30 == 0
         self._state.report_outbox_level(self._store.backpressure_level(), now)
         if not self._state.can_generate():
@@ -217,7 +223,9 @@ class EdgeAgent:
             event_ids.append(
                 self._builder.build_and_enqueue(
                     candidate,
-                    model_version=self._detector.model_version,
+                    model_version=(
+                        candidate.model_version or self._detector.model_version
+                    ),
                     frame_bytes=self._frame_bytes(frame),
                 )
             )
@@ -564,6 +572,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "classes; env GL_MODEL_MANIFEST). The SHA-256 is verified before "
         "the model loads.",
     )
+    parser.add_argument(
+        "--secondary-model",
+        default=os.environ.get("GL_SECONDARY_MODEL_PATH"),
+        help="Optional second ONNX model run on each RTSP frame; requires "
+        "--secondary-model-manifest (env GL_SECONDARY_MODEL_PATH).",
+    )
+    parser.add_argument(
+        "--secondary-model-manifest",
+        default=os.environ.get("GL_SECONDARY_MODEL_MANIFEST"),
+        help="Manifest for --secondary-model "
+        "(env GL_SECONDARY_MODEL_MANIFEST).",
+    )
     return parser
 
 
@@ -727,9 +747,28 @@ def main(argv: list[str] | None = None) -> int:
             # OnnxDetector raises ModelVerificationError on any hash or
             # manifest problem — the agent refuses to start rather than
             # run an unverified artefact (TRD 5.6).
-            detector = OnnxDetector(args.model, args.model_manifest)
+            primary_detector = OnnxDetector(args.model, args.model_manifest)
+            if args.secondary_model or args.secondary_model_manifest:
+                if not (
+                    args.secondary_model and args.secondary_model_manifest
+                ):
+                    parser.error(
+                        "--secondary-model and --secondary-model-manifest "
+                        "go together"
+                    )
+                detector = CompositeDetector(
+                    [
+                        primary_detector,
+                        OnnxDetector(
+                            args.secondary_model,
+                            args.secondary_model_manifest,
+                        ),
+                    ]
+                )
+            else:
+                detector = primary_detector
             logging.getLogger(__name__).info(
-                "OnnxDetector loaded: model_version=%s",
+                "ONNX detector pipeline loaded: model_version=%s",
                 detector.model_version,
             )
         else:
@@ -755,6 +794,7 @@ def main(argv: list[str] | None = None) -> int:
         evaluator=RuleEvaluator(store),
         builder=EventBuilder(store, data_dir / "spool", args.agent_id),
         publisher=Publisher(store, client, args.api, authenticator),
+        preview_publisher=PreviewPublisher(client, args.api, authenticator),
         config_sync=ConfigSync(
             store, client, args.api, args.agent_id, authenticator
         ),

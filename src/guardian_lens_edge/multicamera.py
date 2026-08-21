@@ -16,11 +16,11 @@ Threading model — one pump thread per camera, one consumer:
   held in memory only) and a daemon thread iterating ``source.frames()``
   into a shared **bounded** queue.
 * Bounded means backpressure: when the consumer falls behind and the
-  queue is full, the arriving (NEWEST) sample is dropped and counted —
-  the pump never blocks, so a slow main loop can never make a camera
-  thread stop draining its RTSP buffer, and the queue keeps the oldest
-  not-yet-processed samples so event ``occurred_at`` ordering is
-  preserved.
+  queue is full, the OLDEST pending sample is dropped and counted before
+  the newest sample is inserted. The pump never blocks, so a slow main
+  loop cannot make a camera thread stop draining its RTSP buffer. This
+  deliberately favours a fresh view over replaying stale video: detection
+  is sampled monitoring, not an archival decoder.
 * Stream status callbacks (lost / restored / connected / degraded) are
   raised on camera threads, but the edge store's SQLite connection is
   single-threaded — so they are queued as status events and dispatched to
@@ -70,10 +70,12 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-#: Frame-queue capacity. A loop mechanic (roughly: seconds of buffered
-#: samples across cameras before drop-newest engages), not an `[OPEN]`
-#: product threshold — so a sane dev default is appropriate here.
-DEFAULT_QUEUE_CAPACITY = 64
+#: Keep only the freshest pending frame by default. With the old value of
+#: 64, a 2 FPS stream could make live preview and detection trail reality
+#: by more than 30 seconds whenever inference was slower than capture.
+#: Operators with several cameras may raise this, but stale frames are
+#: still evicted first when the configured capacity is reached.
+DEFAULT_QUEUE_CAPACITY = 1
 
 _THREAD_JOIN_TIMEOUT_SECONDS = 10.0
 
@@ -387,10 +389,22 @@ class MultiCameraSource:
                 try:
                     self._frame_queue.put_nowait(frame)
                 except queue.Full:
-                    # Backpressure: drop the NEWEST sample (this one) and
-                    # count it. Never block — blocking here would stop the
-                    # RTSP drain and grow driver-side lag unboundedly.
-                    self._count_drop(camera_id)
+                    # Backpressure must favour freshness. Remove one stale
+                    # pending frame and replace it with the new sample. The
+                    # consumer can race us between these operations, so an
+                    # empty/full transition is harmless and retried once.
+                    try:
+                        stale = self._frame_queue.get_nowait()
+                    except queue.Empty:
+                        stale = None
+                    if stale is not None:
+                        self._count_drop(stale.camera_id)
+                    try:
+                        self._frame_queue.put_nowait(frame)
+                    except queue.Full:
+                        # Another camera won the newly available slot. This
+                        # sample is now the one that must be counted.
+                        self._count_drop(camera_id)
         except Exception:  # noqa: BLE001 — a dead pump must be loud, and an
             # exception on a daemon thread would otherwise vanish.
             logger.exception("camera %s pump thread crashed", camera_id)
@@ -404,7 +418,7 @@ class MultiCameraSource:
             self._dropped_frames[camera_id] = count
         if count == 1 or count % 100 == 0:
             logger.warning(
-                "frame queue full: dropped newest sample from camera %s "
+                "frame queue full: dropped stale sample from camera %s "
                 "(dropped=%d)",
                 camera_id,
                 count,

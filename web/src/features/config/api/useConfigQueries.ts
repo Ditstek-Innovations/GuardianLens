@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { apiClient } from '@/lib/api/client';
 import { unwrapItems } from '@/lib/api/list';
+import { AUTO_REFRESH_INTERVAL_MS } from '@/constants/query';
 
 import { configKeys } from './configKeys';
 
@@ -21,6 +22,7 @@ export const useSitesQuery = (enabled: boolean) =>
     queryFn: async ({ signal }) =>
       unwrapItems(await apiClient.get<ListResponse<Site> | Site[]>('/api/v1/sites', { signal })),
     enabled,
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });
 
 /** TRD §10.6 — GET /cameras is site_admin scoped too; non-admin callers gate `enabled`. */
@@ -34,7 +36,7 @@ export const useCamerasQuery = (enabled: boolean = true) =>
         }),
       ),
     enabled,
-    refetchInterval: 10_000,
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });
 
 export const useZonesQuery = () =>
@@ -44,6 +46,7 @@ export const useZonesQuery = () =>
       unwrapItems(
         await apiClient.get<ListResponse<ZoneSummary> | ZoneSummary[]>('/api/v1/zones', { signal }),
       ),
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });
 
 export const useRulesQuery = () =>
@@ -53,6 +56,7 @@ export const useRulesQuery = () =>
       unwrapItems(
         await apiClient.get<ListResponse<RuleSummary> | RuleSummary[]>('/api/v1/rules', { signal }),
       ),
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });
 
 const fetchModelVersions = async (signal?: AbortSignal): Promise<ModelVersionSummary[]> =>
@@ -74,6 +78,7 @@ export const useModelVersionsQuery = () =>
   useQuery({
     queryKey: configKeys.models(),
     queryFn: async ({ signal }) => fetchModelVersions(signal),
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });
 
 /**
@@ -86,4 +91,5 @@ export const useModelClassesQuery = () =>
     queryKey: configKeys.models(),
     queryFn: async ({ signal }) => fetchModelVersions(signal),
     select: (models) => [...new Set(models.flatMap((model) => modelClassNames(model.classes)))].sort(),
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });

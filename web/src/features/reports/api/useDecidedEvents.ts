@@ -1,6 +1,7 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 
 import { apiClient } from '@/lib/api/client';
+import { AUTO_REFRESH_INTERVAL_MS } from '@/constants/query';
 
 import { reportKeys } from './reportKeys';
 
@@ -32,4 +33,5 @@ export const useDecidedEvents = (params: ReportParams, status: string) =>
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: params.from !== '' && params.to !== '',
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });

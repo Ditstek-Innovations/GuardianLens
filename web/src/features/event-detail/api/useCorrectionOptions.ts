@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { apiClient } from '@/lib/api/client';
+import { AUTO_REFRESH_INTERVAL_MS } from '@/constants/query';
 
 import { eventKeys } from './eventKeys';
 
@@ -12,5 +13,5 @@ export const useCorrectionOptions = (eventId: string, enabled: boolean) =>
     queryFn: ({ signal }) =>
       apiClient.get<CorrectionOptions>(`/api/v1/events/${eventId}/correction-options`, { signal }),
     enabled: enabled && eventId !== '',
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });
-

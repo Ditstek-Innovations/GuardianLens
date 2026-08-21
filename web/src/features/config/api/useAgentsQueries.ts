@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiClient } from '@/lib/api/client';
 import { unwrapItems } from '@/lib/api/list';
+import { AUTO_REFRESH_INTERVAL_MS } from '@/constants/query';
 
 import { configKeys } from './configKeys';
 
@@ -17,6 +18,7 @@ export const useAgentsQuery = () =>
           signal,
         }),
       ),
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });
 
 export interface RegisterAgentInput {

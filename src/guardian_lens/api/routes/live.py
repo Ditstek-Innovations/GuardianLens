@@ -6,8 +6,10 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
+from pydantic import BaseModel, ConfigDict
+from typing import Literal
 
-from guardian_lens.api.dependencies.auth import require_agent, require_queue_read
+from guardian_lens.api.dependencies.auth import require_agent, require_queue_read, require_site_admin
 from guardian_lens.api.dependencies.tenant import get_tenant_context
 from guardian_lens.core.errors import (
     MalformedRequestError,
@@ -16,11 +18,34 @@ from guardian_lens.core.errors import (
 )
 from guardian_lens.core.principal import AgentPrincipal, HumanPrincipal
 from guardian_lens.repositories.config import ConfigRepository
+from guardian_lens.services.ptz_commands import PtzCommand
 from guardian_lens.tenancy.context import TenantContext
 
 router = APIRouter(tags=["live"])
 
 _MAX_PREVIEW_BYTES = 2 * 1024 * 1024
+
+
+class PtzMoveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    direction: Literal["up", "down", "left", "right"]
+
+
+class PtzCommandResponse(BaseModel):
+    id: UUID
+    camera_id: UUID
+    direction: str
+    created_at: datetime
+
+
+def _ptz_response(command: PtzCommand) -> PtzCommandResponse:
+    return PtzCommandResponse(
+        id=command.id,
+        camera_id=command.camera_id,
+        direction=command.direction,
+        created_at=command.created_at,
+    )
 
 
 def _camera_in_site(
@@ -81,3 +106,31 @@ def live_frame(
             "X-Captured-At": preview.captured_at.isoformat(),
         },
     )
+
+
+@router.post("/cameras/{camera_id}/ptz", response_model=PtzCommandResponse, status_code=202)
+def queue_ptz_move(
+    camera_id: UUID,
+    body: PtzMoveRequest,
+    request: Request,
+    principal: HumanPrincipal = Depends(require_site_admin),
+    context: TenantContext = Depends(get_tenant_context),
+) -> PtzCommandResponse:
+    camera = _camera_in_site(context, camera_id, principal.site_ids())
+    command = request.app.state.ptz_command_store.enqueue(
+        principal.tenant_slug, camera.site_id, camera_id, body.direction
+    )
+    return _ptz_response(command)
+
+
+@router.get("/agents/ptz-commands", response_model=list[PtzCommandResponse])
+def take_ptz_commands(
+    request: Request,
+    agent: AgentPrincipal = Depends(require_agent),
+) -> list[PtzCommandResponse]:
+    return [
+        _ptz_response(command)
+        for command in request.app.state.ptz_command_store.take(
+            agent.tenant_slug, agent.site_id
+        )
+    ]

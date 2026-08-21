@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { apiClient } from '@/lib/api/client';
 import { unwrapItems } from '@/lib/api/list';
+import { AUTO_REFRESH_INTERVAL_MS } from '@/constants/query';
 
 import type { AuditEntry, ListResponse } from '@/lib/api/types';
 
@@ -22,4 +23,5 @@ export const useAuditQuery = () =>
       unwrapItems(
         await apiClient.get<ListResponse<AuditEntry> | AuditEntry[]>('/api/v1/audit', { signal }),
       ),
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });

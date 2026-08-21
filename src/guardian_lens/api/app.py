@@ -44,6 +44,7 @@ from guardian_lens.core.settings import Settings, load_settings
 from guardian_lens.repositories.evidence import FilesystemEvidenceStore
 from guardian_lens.services.identity import IdentityService
 from guardian_lens.services.live_preview import LivePreviewStore
+from guardian_lens.services.ptz_commands import PtzCommandStore
 from guardian_lens.services.sealer import build_sealer
 from guardian_lens.services.self_service import SelfServiceAuthService
 from guardian_lens.services.tokens import TokenService
@@ -153,6 +154,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.password_reset_rate_limit, settings.login_rate_window_seconds
     )
     app.state.live_preview_store = LivePreviewStore()
+    app.state.ptz_command_store = PtzCommandStore()
 
     # -- routes -------------------------------------------------------------
     prefix = "/api/v1"

@@ -247,24 +247,25 @@ def test_camera_without_sealed_url_is_reported_not_started() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Backpressure: bounded queue drops the NEWEST and counts
+# Backpressure: bounded queue drops stale frames and keeps the newest
 # ---------------------------------------------------------------------------
 
 
-def test_full_queue_drops_newest_sample_and_counts_it() -> None:
+def test_full_queue_drops_oldest_sample_and_keeps_latest() -> None:
     wiring = Wiring(queue_capacity=2)
     wiring.scripts["cam-a"] = [make_frame("cam-a", n) for n in range(5)]
     wiring.source.apply_config(config(camera("cam-a")), T0)
     try:
         # The pump never blocks: it finishes all 5 puts without the
-        # consumer taking anything; 3 newest samples are dropped.
+        # consumer taking anything; 3 stale samples are dropped.
         wait_until(
             lambda: wiring.source.dropped_frames().get("cam-a") == 3
         )
-        # The queue kept the OLDEST samples (drop-newest, not drop-oldest).
+        # The queue keeps the freshest samples so live view and detection
+        # do not replay an ever-growing backlog.
         first = wiring.source.next_frame(timeout=WAIT_SECONDS)
         second = wiring.source.next_frame(timeout=WAIT_SECONDS)
-        assert (first.sequence, second.sequence) == (0, 1)
+        assert (first.sequence, second.sequence) == (3, 4)
         assert wiring.source.next_frame(timeout=0.05) is None
     finally:
         wiring.source.close()

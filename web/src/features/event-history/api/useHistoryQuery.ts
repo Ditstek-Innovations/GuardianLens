@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 
-import { QUEUE_PAGE_SIZE } from '@/constants/query';
+import { AUTO_REFRESH_INTERVAL_MS, QUEUE_PAGE_SIZE } from '@/constants/query';
 import { apiClient } from '@/lib/api/client';
 
 import type { QueuePage } from '@/lib/api/types';
@@ -32,4 +32,5 @@ export const useHistoryQuery = (status: string, from?: string, to?: string) =>
       }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });

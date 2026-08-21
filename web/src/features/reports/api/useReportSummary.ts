@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { apiClient } from '@/lib/api/client';
+import { AUTO_REFRESH_INTERVAL_MS } from '@/constants/query';
 
 import { reportKeys } from './reportKeys';
 
@@ -21,4 +22,5 @@ export const useReportSummary = (params: ReportParams) =>
         signal,
       }),
     enabled: params.from !== '' && params.to !== '',
+    refetchInterval: AUTO_REFRESH_INTERVAL_MS,
   });

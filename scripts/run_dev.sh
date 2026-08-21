@@ -188,6 +188,24 @@ free_port() {
 free_port 8000 "guardian_lens.api"
 free_port "$WEB_PORT" "vite.*--port ${WEB_PORT}"
 
+# A training worker has no listening port, so the stale-port guard above
+# cannot find it. Stop only workers whose current directory is THIS checkout;
+# otherwise repeated make-run cycles would train the same dataset twice.
+for pid in $(pgrep -f '[.]venv/bin/python scripts/training_worker.py' || true); do
+  if [ "$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)" = "$(pwd -P)" ]; then
+    echo "    clearing stale training worker (pid ${pid})"
+    kill "$pid" 2>/dev/null || true
+    for i in 1 2 3 4 5 6; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "    stale worker is inside a training call; forcing it to stop"
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+done
+
 cleanup() { kill 0 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 

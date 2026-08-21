@@ -43,6 +43,7 @@ from guardian_lens_edge.multicamera import (
 )
 from guardian_lens_edge.publisher import Publisher, PublishReport
 from guardian_lens_edge.preview import PreviewPublisher
+from guardian_lens_edge.ptz import PtzCommandPoller
 from guardian_lens_edge.rules import RuleEvaluator
 from guardian_lens_edge.scenario import Scenario
 from guardian_lens_edge.state import AgentStateMachine, GapRecorder, STREAM_LOST_REASON
@@ -86,6 +87,7 @@ class EdgeAgent:
         agent_id: str,
         site_id: str,
         preview_publisher: PreviewPublisher | None = None,
+        ptz_poller: PtzCommandPoller | None = None,
     ) -> None:
         self._store = store
         self._frame_source = frame_source
@@ -98,6 +100,7 @@ class EdgeAgent:
         self._agent_id = agent_id
         self._site_id = site_id
         self._preview_publisher = preview_publisher
+        self._ptz_poller = ptz_poller
         self._review_block: dict[str, dict[str, object]] = {}
 
     @property
@@ -295,6 +298,7 @@ class EdgeAgent:
         publish_interval_seconds: float = 2.0,
         config_interval_seconds: float = 30.0,
         health_interval_seconds: float = 30.0,
+        ptz_interval_seconds: float = 0.5,
         frame_timeout_seconds: float = 0.25,
         utc_now: Callable[[], datetime] | None = None,
     ) -> None:
@@ -329,6 +333,7 @@ class EdgeAgent:
         next_publish_at = now
         next_config_at = now + timedelta(seconds=config_interval_seconds)
         next_health_at = now
+        next_ptz_at = now
         try:
             while not stop_event.is_set():
                 frame = source.next_frame(timeout=frame_timeout_seconds)
@@ -347,6 +352,9 @@ class EdgeAgent:
                 if now >= next_health_at:
                     self.health_tick(now)
                     next_health_at = now + timedelta(seconds=health_interval_seconds)
+                if self._ptz_poller is not None and now >= next_ptz_at:
+                    self._ptz_poller.tick()
+                    next_ptz_at = now + timedelta(seconds=ptz_interval_seconds)
         finally:
             # Clean shutdown: sources first (stops the camera threads and
             # records any final stream status), then one last drain so a
@@ -550,7 +558,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=_int_env("GL_QUEUE_CAPACITY") or DEFAULT_QUEUE_CAPACITY,
         help="Bounded frame-queue capacity across cameras; when full the "
-        "newest sample is dropped and counted (default "
+        "oldest stale sample is dropped and counted (default "
         f"{DEFAULT_QUEUE_CAPACITY}; env GL_QUEUE_CAPACITY).",
     )
     # Real detection in rtsp mode — GOVERNANCE.md 9 gate G1 territory. Both
@@ -787,6 +795,9 @@ def main(argv: list[str] | None = None) -> int:
         detector = SyntheticDetector(scenario)
     client = httpx.Client(timeout=10.0)
     authenticator = AgentAuthenticator(client, args.api, credential)
+    config_sync = ConfigSync(
+        store, client, args.api, args.agent_id, authenticator
+    )
     agent = EdgeAgent(
         store=store,
         frame_source=frame_source,
@@ -795,8 +806,13 @@ def main(argv: list[str] | None = None) -> int:
         builder=EventBuilder(store, data_dir / "spool", args.agent_id),
         publisher=Publisher(store, client, args.api, authenticator),
         preview_publisher=PreviewPublisher(client, args.api, authenticator),
-        config_sync=ConfigSync(
-            store, client, args.api, args.agent_id, authenticator
+        config_sync=config_sync,
+        ptz_poller=(
+            PtzCommandPoller(
+                client, args.api, authenticator, config_sync, unsealer
+            )
+            if unsealer is not None
+            else None
         ),
         state=AgentStateMachine(
             store,

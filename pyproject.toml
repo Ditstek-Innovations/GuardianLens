@@ -31,6 +31,12 @@ edge-camera = [
     # behaviour; OpenCV 5 is not yet covered by the RTSP integration suite.
     "opencv-python-headless>=4.9,<5",
 ]
+# Training is isolated from the API/edge runtime. The worker imports this
+# extra only when explicitly started, so inference keeps running while a
+# candidate model trains in a separate process.
+training = [
+    "ultralytics>=8.3,<9",
+]
 dev = [
     "bandit>=1.7",
     "pytest>=8.0",

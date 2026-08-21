@@ -38,6 +38,7 @@ from guardian_lens.repositories.tables import (
     sites,
     users,
     zones,
+    training_samples,
 )
 
 __all__ = ["EventRepository", "encode_cursor", "decode_cursor", "sessionize"]
@@ -352,6 +353,61 @@ class EventRepository:
                 corrected_by=corrected_by,
             )
         )
+
+    def insert_training_sample(
+        self,
+        *,
+        event_id: UUID,
+        site_id: UUID,
+        decision_type: str,
+        class_name: str | None,
+        bbox_norm: list[float] | None,
+        eligible: bool,
+        reviewed_by: UUID,
+    ) -> None:
+        """Record review feedback once, in the decision transaction.
+
+        Rejected predictions are retained as feedback but are not exported
+        automatically: a blank YOLO label would incorrectly claim that no
+        other object exists anywhere in the frame.
+        """
+        self._session.execute(
+            sa.insert(training_samples).values(
+                event_id=event_id,
+                site_id=site_id,
+                decision_type=decision_type,
+                class_name=class_name,
+                bbox_norm=bbox_norm,
+                eligible=eligible,
+                reviewed_by=reviewed_by,
+                reviewed_at=sa.func.now(),
+            )
+        )
+
+    def training_feedback_summary(self, site_ids: Iterable[UUID]) -> dict[str, Any]:
+        permitted = list(site_ids)
+        reviewed, eligible = self._session.execute(
+            sa.select(
+                sa.func.count(),
+                sa.func.count().filter(training_samples.c.eligible.is_(True)),
+            ).where(training_samples.c.site_id.in_(permitted))
+        ).one()
+        class_rows = self._session.execute(
+            sa.select(training_samples.c.class_name, sa.func.count())
+            .where(
+                training_samples.c.site_id.in_(permitted),
+                training_samples.c.eligible.is_(True),
+                training_samples.c.class_name.is_not(None),
+            )
+            .group_by(training_samples.c.class_name)
+            .order_by(training_samples.c.class_name)
+        ).all()
+        return {
+            "reviewed": int(reviewed),
+            "eligible": int(eligible),
+            "excluded": int(reviewed) - int(eligible),
+            "by_class": {str(name): int(count) for name, count in class_rows},
+        }
 
     # -- reporting (verified only — BR-R-01) ---------------------------------
 

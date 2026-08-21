@@ -89,6 +89,7 @@ class DecisionService:
         request = validate_model(DecisionRequest, body)
         decision = request.decision
         rejection_reason = request.rejection_reason
+        training_feedback = request.training_feedback
         corrections = (
             [item.model_dump() for item in request.corrections]
             if request.corrections is not None
@@ -108,6 +109,11 @@ class DecisionService:
             raise ValidationFailureError(
                 "rejection_reason is required when decision is reject",
                 field="rejection_reason",
+            )
+        if decision != "reject" and training_feedback is not None:
+            raise ValidationFailureError(
+                "training_feedback is only valid when decision is reject",
+                field="training_feedback",
             )
 
         values: dict[str, Any] = {
@@ -140,6 +146,42 @@ class DecisionService:
                 str(corrected_value),
                 principal.user_id,
             )
+
+        training_class = event.predicted_class
+        corrected_rule = next(
+            (
+                value
+                for field_name, value in correction_pairs
+                if field_name == "rule_id"
+            ),
+            None,
+        )
+        if corrected_rule is not None:
+            training_class = self._config.rule_detection_class(corrected_rule)
+        has_training_annotation = (
+            event.evidence_ref is not None
+            and training_class is not None
+            and event.predicted_bbox is not None
+        )
+        self._events.insert_training_sample(
+            event_id=event_pk,
+            site_id=event.site_id,
+            decision_type=decision,
+            class_name=training_class,
+            bbox_norm=(
+                list(event.predicted_bbox)
+                if event.predicted_bbox is not None
+                else None
+            ),
+            eligible=(
+                (
+                    decision in {"accept", "correct"}
+                    or (decision == "reject" and training_feedback == "false_positive")
+                )
+                and has_training_annotation
+            ),
+            reviewed_by=principal.user_id,
+        )
 
         # Same transaction as the update above — BR-AU-03. If this raises,
         # the surrounding rollback discards the decision entirely.

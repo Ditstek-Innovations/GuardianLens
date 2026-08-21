@@ -2,7 +2,17 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { PageHeading } from '@/components/layout/PageHeading';
-import { Button, Chip, EmptyState, ErrorState, Kbd, Modal, Skeleton } from '@/components/ui';
+import {
+  Button,
+  Chip,
+  EmptyState,
+  ErrorState,
+  FormField,
+  Kbd,
+  Modal,
+  Skeleton,
+  Textarea,
+} from '@/components/ui';
 import { QUEUE_NAV_KEY } from '@/constants/events';
 import { MESSAGES } from '@/constants/messages';
 import { ROUTES } from '@/constants/routes';
@@ -11,13 +21,14 @@ import { usePageTitle } from '@/hooks/usePageTitle';
 import { useToast } from '@/hooks/useToast';
 
 import { useAcceptAllQueue } from '../api/useAcceptAllQueue';
+import { useRejectAllQueue } from '../api/useRejectAllQueue';
 import { flattenQueueItems, useQueueQuery } from '../api/useQueueQuery';
 import { useIncidentsQuery } from '../api/useIncidentsQuery';
 import { IncidentRow } from './IncidentRow';
 import { QueueList } from './QueueList';
 import { WhyNotReviewPanel } from './WhyNotReviewPanel';
 
-import type { ReactNode } from 'react';
+import type { ChangeEvent, FormEvent, ReactNode } from 'react';
 import type { IncidentGroup } from '@/lib/api/types';
 
 type QueueView = 'incidents' | 'all';
@@ -49,6 +60,61 @@ const AcceptAllDialog = ({
   </Modal>
 );
 
+const RejectAllDialog = ({
+  count,
+  reason,
+  isSubmitting,
+  onReasonChange,
+  onConfirm,
+  onCancel,
+}: {
+  readonly count: number;
+  readonly reason: string;
+  readonly isSubmitting: boolean;
+  readonly onReasonChange: (reason: string) => void;
+  readonly onConfirm: (reason: string) => void;
+  readonly onCancel: () => void;
+}) => {
+  const [error, setError] = useState<string | null>(null);
+
+  const handleChange = (event: ChangeEvent<HTMLTextAreaElement>): void => {
+    onReasonChange(event.target.value);
+    if (error !== null && event.target.value.trim() !== '') setError(null);
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    const trimmedReason = reason.trim();
+    if (trimmedReason === '') {
+      setError('A rejection reason is required.');
+      return;
+    }
+    onConfirm(trimmedReason);
+  };
+
+  return (
+    <Modal title="Reject all records" onClose={() => !isSubmitting && onCancel()}>
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        <p className="text-sm text-fg-muted">
+          Reject all {count} records currently awaiting review? The records will remain in the
+          rejection log with the reason entered below.
+        </p>
+        <FormField label="Rejection reason" required error={error ?? undefined}>
+          <Textarea rows={3} value={reason} onChange={handleChange} autoFocus />
+        </FormField>
+        <div className="flex justify-end gap-3">
+          <Button variant="ghost" onClick={onCancel} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="danger" isLoading={isSubmitting}>
+            Reject {count} records
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+};
+
 export const QueuePage = () => {
   usePageTitle('Review queue');
   const navigate = useNavigate();
@@ -57,8 +123,11 @@ export const QueuePage = () => {
   const incidentsQuery = useIncidentsQuery();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isConfirmingAcceptAll, setIsConfirmingAcceptAll] = useState(false);
+  const [isConfirmingRejectAll, setIsConfirmingRejectAll] = useState(false);
+  const [rejectAllReason, setRejectAllReason] = useState('');
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
   const acceptAll = useAcceptAllQueue();
+  const rejectAll = useRejectAllQueue();
   const { showToast } = useToast();
 
   const items = query.data === undefined ? [] : flattenQueueItems(query.data.pages);
@@ -131,7 +200,10 @@ export const QueuePage = () => {
       onSuccess: (result) => {
         setIsConfirmingAcceptAll(false);
         if (result.failed === 0) {
-          showToast({ tone: 'success', message: MESSAGES.decision.allAccepted(result.accepted) });
+          showToast({
+            tone: 'success',
+            message: MESSAGES.decision.allAccepted(result.accepted),
+          });
         } else {
           showToast({
             tone: 'notice',
@@ -141,7 +213,37 @@ export const QueuePage = () => {
       },
       onError: () => {
         setIsConfirmingAcceptAll(false);
-        showToast({ tone: 'failure', message: MESSAGES.decision.allAcceptFailed });
+        showToast({
+          tone: 'failure',
+          message: MESSAGES.decision.allAcceptFailed,
+        });
+      },
+    });
+  };
+
+  const handleRejectAll = (reason: string): void => {
+    rejectAll.mutate(reason, {
+      onSuccess: (result) => {
+        setIsConfirmingRejectAll(false);
+        setRejectAllReason('');
+        if (result.failed === 0) {
+          showToast({
+            tone: 'success',
+            message: MESSAGES.decision.allRejected(result.rejected),
+          });
+        } else {
+          showToast({
+            tone: 'notice',
+            message: MESSAGES.decision.allRejectedPartial(result),
+          });
+        }
+      },
+      onError: () => {
+        setIsConfirmingRejectAll(false);
+        showToast({
+          tone: 'failure',
+          message: MESSAGES.decision.allRejectFailed,
+        });
       },
     });
   };
@@ -269,10 +371,18 @@ export const QueuePage = () => {
           <Button
             size="sm"
             variant="ok"
-            disabled={(queueDepth ?? 0) === 0 || acceptAll.isPending}
+            disabled={(queueDepth ?? 0) === 0 || acceptAll.isPending || rejectAll.isPending}
             onClick={() => setIsConfirmingAcceptAll(true)}
           >
             Accept all
+          </Button>
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={(queueDepth ?? 0) === 0 || acceptAll.isPending || rejectAll.isPending}
+            onClick={() => setIsConfirmingRejectAll(true)}
+          >
+            Reject all
           </Button>
           {/* View toggle — grouping is presentation; both views show the
               same candidates and the same one-by-one decisions. */}
@@ -308,6 +418,19 @@ export const QueuePage = () => {
           isSubmitting={acceptAll.isPending}
           onConfirm={handleAcceptAll}
           onCancel={() => setIsConfirmingAcceptAll(false)}
+        />
+      ) : null}
+      {isConfirmingRejectAll ? (
+        <RejectAllDialog
+          count={queueDepth ?? 0}
+          reason={rejectAllReason}
+          isSubmitting={rejectAll.isPending}
+          onReasonChange={setRejectAllReason}
+          onConfirm={handleRejectAll}
+          onCancel={() => {
+            setIsConfirmingRejectAll(false);
+            setRejectAllReason('');
+          }}
         />
       ) : null}
     </section>

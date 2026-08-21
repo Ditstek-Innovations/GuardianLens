@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class EvidencePayload(BaseModel):
@@ -15,6 +15,32 @@ class EvidencePayload(BaseModel):
     content_type: Literal["image/jpeg"]
     blurred: bool = False
     data_b64: str
+
+
+class DetectionPrediction(BaseModel):
+    """Structured model output retained for review feedback and training."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    class_name: str = Field(min_length=1, max_length=100)
+    bbox_norm: tuple[
+        float,
+        float,
+        float,
+        float,
+    ]
+
+    @field_validator("bbox_norm")
+    @classmethod
+    def validate_bbox(
+        cls, value: tuple[float, float, float, float]
+    ) -> tuple[float, float, float, float]:
+        x1, y1, x2, y2 = value
+        if not all(0.0 <= coordinate <= 1.0 for coordinate in value):
+            raise ValueError("bbox_norm coordinates must be between 0 and 1")
+        if x2 <= x1 or y2 <= y1:
+            raise ValueError("bbox_norm must have positive width and height")
+        return value
 
 
 class EventIngestRequest(BaseModel):
@@ -32,6 +58,7 @@ class EventIngestRequest(BaseModel):
     source: Literal["guardian_lens", "nvr"] = "guardian_lens"
     model_version: str | None = Field(default=None, max_length=40)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    prediction: DetectionPrediction | None = None
     occurred_at: datetime
     evidence: EvidencePayload | None = None
 
@@ -196,6 +223,8 @@ class EventDetail(BaseModel):
     rule_snapshot: dict[str, Any]
     source: str
     confidence: float | None
+    predicted_class: str | None = None
+    predicted_bbox: list[float] | None = None
     occurred_at: datetime
     received_at: datetime
     status: str
@@ -227,6 +256,7 @@ class DecisionRequest(BaseModel):
     decision: Literal["accept", "reject", "correct"]
     version: int = Field(ge=1)
     rejection_reason: str | None = Field(default=None, max_length=2000)
+    training_feedback: Literal["false_positive", "exclude"] | None = None
     corrections: list[CorrectionItem] | None = None
 
 

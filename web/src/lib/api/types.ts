@@ -1,5 +1,5 @@
-import type { EventStatus } from '@/constants/events';
-import type { Role } from '@/constants/roles';
+import type { EventStatus } from "@/constants/events";
+import type { Role } from "@/constants/roles";
 
 /**
  * Wire types for the control-plane API (TRD §10).
@@ -31,7 +31,7 @@ export interface LoginResponse {
  * client never branches on the payload.
  */
 export interface AcceptedResponse {
-  status: 'accepted';
+  status: "accepted";
   message: string;
 }
 
@@ -119,12 +119,15 @@ export interface IncidentQueueResponse {
 }
 
 export interface EventDetail extends QueueEventItem {
+  predicted_class?: string | null;
+  /** Normalized x1, y1, x2, y2 coordinates for the model prediction. */
+  predicted_bbox?: [number, number, number, number] | null;
   /** ASSUMPTION A-3 — receipt time on the detail response (ADR-007 delay display). */
   received_at?: string;
   /** BR-005 — present exactly when the event is decided; null while unverified. */
   reviewer?: { id: string; full_name: string } | null;
   decided_at?: string | null;
-  decision_type?: 'accept' | 'reject' | 'correct' | null;
+  decision_type?: "accept" | "reject" | "correct" | null;
   rejection_reason?: string | null;
   /** The rule exactly as it stood when the event fired — frozen at ingest,
    * independent of any later edit to the live rule row. */
@@ -148,20 +151,52 @@ export interface CorrectionOptions {
   rules: CorrectionChoice[];
 }
 
+export interface TrainingFeedback {
+  reviewed: number;
+  eligible: number;
+  excluded: number;
+  by_class: Record<string, number>;
+  worker_state:
+    | "not_started"
+    | "collecting"
+    | "training"
+    | "candidate_ready"
+    | "failed"
+    | string;
+  worker_detail: string | null;
+  dataset_hash: string | null;
+  candidate_path: string | null;
+  deployed: boolean;
+  minimum_samples: number;
+  current_epoch: number | null;
+  total_epochs: number | null;
+  progress_percent: number | null;
+  updated_at: string | null;
+}
+
 export interface DecisionResponse {
   id: string;
   status: EventStatus;
   reviewer: { id: string; full_name: string };
   decided_at: string;
-  decision_type: 'accept' | 'reject' | 'correct';
+  decision_type: "accept" | "reject" | "correct";
   version: number;
 }
 
 /** BR-S-01 / CS-B-05 — no reviewer_id field exists in any request variant. */
 export type DecisionRequestBody =
-  | { decision: 'accept'; version: number }
-  | { decision: 'reject'; rejection_reason: string; version: number }
-  | { decision: 'correct'; corrections: Array<{ field: string; value: string }>; version: number };
+  | { decision: "accept"; version: number }
+  | {
+      decision: "reject";
+      rejection_reason: string;
+      training_feedback: "false_positive" | "exclude";
+      version: number;
+    }
+  | {
+      decision: "correct";
+      corrections: Array<{ field: string; value: string }>;
+      version: number;
+    };
 
 /** TRD §10.8 — the single error envelope. */
 export interface ApiErrorEnvelope {

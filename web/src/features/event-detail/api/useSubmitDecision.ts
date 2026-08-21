@@ -1,27 +1,44 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { queueKeys } from '@/features/review-queue';
-import { apiClient } from '@/lib/api/client';
-import { assertNever } from '@/lib/utils/assertNever';
+import { queueKeys } from "@/features/review-queue";
+import { apiClient } from "@/lib/api/client";
+import { assertNever } from "@/lib/utils/assertNever";
 
-import type { InfiniteData } from '@tanstack/react-query';
-import type { DecisionRequestBody, DecisionResponse, QueuePage } from '@/lib/api/types';
-import type { Decision } from '@/types/decision';
+import type { InfiniteData } from "@tanstack/react-query";
+import type {
+  DecisionRequestBody,
+  DecisionResponse,
+  QueuePage,
+} from "@/lib/api/types";
+import type { Decision } from "@/types/decision";
 
 /**
  * BR-S-01 / CS-B-05 — reviewer identity comes from the session token only.
  * No request variant carries reviewer_id; the type makes that unrepresentable.
  */
-const toRequestBody = (decision: Decision, version: number): DecisionRequestBody => {
+const toRequestBody = (
+  decision: Decision,
+  version: number,
+): DecisionRequestBody => {
   switch (decision.type) {
-    case 'accept':
-      return { decision: 'accept', version };
-    case 'reject':
-      return { decision: 'reject', rejection_reason: decision.reason, version };
-    case 'correct':
+    case "accept":
+      return { decision: "accept", version };
+    case "reject":
       return {
-        decision: 'correct',
-        corrections: [{ field: decision.correction.field, value: decision.correction.value }],
+        decision: "reject",
+        rejection_reason: decision.reason,
+        training_feedback: "false_positive",
+        version,
+      };
+    case "correct":
+      return {
+        decision: "correct",
+        corrections: [
+          {
+            field: decision.correction.field,
+            value: decision.correction.value,
+          },
+        ],
         version,
       };
     default:
@@ -66,8 +83,13 @@ export const useSubmitDecision = (eventId: string) => {
     // until the server confirms, no Verified Record exists (BR-004, CS-B-06).
     onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: queueKeys.lists() });
-      const previous = queryClient.getQueriesData<QueueData>({ queryKey: queueKeys.lists() });
-      queryClient.setQueriesData<QueueData>({ queryKey: queueKeys.lists() }, removeFromQueue(eventId));
+      const previous = queryClient.getQueriesData<QueueData>({
+        queryKey: queueKeys.lists(),
+      });
+      queryClient.setQueriesData<QueueData>(
+        { queryKey: queueKeys.lists() },
+        removeFromQueue(eventId),
+      );
       return { previous };
     },
 

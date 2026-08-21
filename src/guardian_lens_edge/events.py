@@ -17,7 +17,6 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from guardian_lens_edge.annotate import annotate_evidence
 from guardian_lens_edge.rules import CandidateDecision
 from guardian_lens_edge.store import EdgeStore
 from guardian_lens_edge.uuid7 import generate_uuid7
@@ -104,15 +103,9 @@ class EventBuilder:
         occurred_ms = int(candidate.occurred_at.timestamp() * 1000)
         event_id = str(generate_uuid7(occurred_ms))
         evidence_path = self._spool_dir / f"{event_id}.jpg"
-        if frame_bytes is not None and candidate.bbox_norm is not None:
-            # Mark WHAT fired and WHERE, with a magnified inset — a
-            # best-effort decoration that can never cost the evidence
-            # (annotate_evidence returns the original bytes on any failure).
-            frame_bytes = annotate_evidence(
-                frame_bytes,
-                candidate.bbox_norm,
-                f"{candidate.rule.human_readable} {candidate.confidence:.0%}",
-            )
+        # Store the clean camera frame. The review UI draws the prediction
+        # overlay from structured coordinates; burning labels into these
+        # bytes would contaminate every future training sample.
         evidence_path.write_bytes(
             frame_bytes if frame_bytes is not None else placeholder_jpeg()
         )
@@ -137,6 +130,14 @@ class EventBuilder:
             "source": EVENT_SOURCE_GUARDIAN_LENS,
             "model_version": model_version,
             "confidence": candidate.confidence,
+            "prediction": (
+                {
+                    "class_name": candidate.rule.detection_class,
+                    "bbox_norm": list(candidate.bbox_norm),
+                }
+                if candidate.bbox_norm is not None
+                else None
+            ),
             "occurred_at": iso_utc(candidate.occurred_at),
             # data_b64 is added by the publisher at send time from the
             # spooled file (see class docstring).

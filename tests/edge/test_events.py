@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -66,6 +67,7 @@ def test_builder_payload_shape(store: EdgeStore, tmp_path: Path) -> None:
     assert set(payload) == {
         "event_id", "camera_id", "zone_id", "rule_id", "rule_snapshot",
         "source", "model_version", "confidence", "occurred_at", "evidence",
+        "prediction",
     }
     # The verification gate, layer 1: the edge never expresses a status.
     assert "status" not in payload
@@ -73,6 +75,7 @@ def test_builder_payload_shape(store: EdgeStore, tmp_path: Path) -> None:
     assert "decided_at" not in payload
     assert payload["source"] == "guardian_lens"
     assert payload["model_version"] == "synthetic-0.0.0"
+    assert payload["prediction"] is None
     assert payload["occurred_at"] == "2026-08-12T09:00:05Z"
     # The FULL rule as configured, snapshotted at detection time.
     assert payload["rule_snapshot"] == candidate.rule.model_dump()
@@ -83,6 +86,22 @@ def test_builder_payload_shape(store: EdgeStore, tmp_path: Path) -> None:
     assert payload["evidence"] == {
         "content_type": "image/jpeg",
         "blurred": False,
+    }
+
+
+def test_builder_keeps_clean_frame_and_structured_prediction(
+    store: EdgeStore, tmp_path: Path
+) -> None:
+    builder = EventBuilder(store, tmp_path / "spool", AGENT_ID)
+    candidate = replace(make_candidate(), bbox_norm=(0.2, 0.3, 0.6, 0.9))
+    clean = b"\xff\xd8clean-camera-frame\xff\xd9"
+    event_id = builder.build_and_enqueue(candidate, model_version="m", frame_bytes=clean)
+    row = store.claim_batch(1, now="x")[0]
+
+    assert Path(row.evidence_path).read_bytes() == clean
+    assert row.payload["prediction"] == {
+        "class_name": candidate.rule.detection_class,
+        "bbox_norm": [0.2, 0.3, 0.6, 0.9],
     }
 
 

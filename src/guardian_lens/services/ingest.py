@@ -88,6 +88,12 @@ class EventIngestService:
             "source": request.source,
             "agent_id": agent.agent_id,
             "confidence": request.confidence,
+            "predicted_class": (
+                request.prediction.class_name if request.prediction is not None else None
+            ),
+            "predicted_bbox": (
+                list(request.prediction.bbox_norm) if request.prediction is not None else None
+            ),
             "occurred_at": request.occurred_at,
             "received_at": received_at,
         }

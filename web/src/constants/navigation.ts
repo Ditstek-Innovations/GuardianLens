@@ -1,28 +1,38 @@
-import { ROLE } from './roles';
-import { ROUTES } from './routes';
+import { ROLE } from "./roles";
+import { ROUTES } from "./routes";
 
-import type { Role } from './roles';
+import type { Role } from "./roles";
 
 /** CS-SH-02 — navigation is grouped Review · Records · Administration. */
 export const NAV_GROUP = {
-  REVIEW: 'review',
-  RECORDS: 'records',
-  ADMINISTRATION: 'administration',
+  REVIEW: "review",
+  RECORDS: "records",
+  ADMINISTRATION: "administration",
 } as const;
 
 export type NavGroup = (typeof NAV_GROUP)[keyof typeof NAV_GROUP];
 
-export const NAV_GROUP_ORDER: readonly { readonly id: NavGroup; readonly label: string }[] = [
-  { id: NAV_GROUP.REVIEW, label: 'Review' },
-  { id: NAV_GROUP.RECORDS, label: 'Records' },
-  { id: NAV_GROUP.ADMINISTRATION, label: 'Administration' },
+export const NAV_GROUP_ORDER: readonly {
+  readonly id: NavGroup;
+  readonly label: string;
+}[] = [
+  { id: NAV_GROUP.REVIEW, label: "Review" },
+  { id: NAV_GROUP.RECORDS, label: "Records" },
+  { id: NAV_GROUP.ADMINISTRATION, label: "Administration" },
 ];
 
 /**
  * Icon identity per nav entry. The drawings live in the shell (inline SVG,
  * §12.1 — no icon font, no external asset); this file stays pure data.
  */
-export type NavIconName = 'queue' | 'live' | 'history' | 'reports' | 'configuration' | 'audit';
+export type NavIconName =
+  | "queue"
+  | "live"
+  | "history"
+  | "reports"
+  | "training"
+  | "configuration"
+  | "audit";
 
 export interface NavItem {
   readonly path: string;
@@ -43,22 +53,22 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   {
     path: ROUTES.queue,
-    label: 'Review queue',
-    icon: 'queue',
+    label: "Review queue",
+    icon: "queue",
     group: NAV_GROUP.REVIEW,
     roles: [ROLE.REVIEWER, ROLE.SAFETY_MANAGER, ROLE.SITE_ADMIN, ROLE.AUDITOR],
   },
   {
     path: ROUTES.liveFeeding,
-    label: 'Live feeding',
-    icon: 'live',
+    label: "Live feeding",
+    icon: "live",
     group: NAV_GROUP.REVIEW,
     roles: [ROLE.REVIEWER, ROLE.SAFETY_MANAGER, ROLE.SITE_ADMIN, ROLE.AUDITOR],
   },
   {
     path: ROUTES.history,
-    label: 'Event history',
-    icon: 'history',
+    label: "Event history",
+    icon: "history",
     group: NAV_GROUP.RECORDS,
     // §23.4 — every role reads history; the auditor's view is read-only by
     // construction (no decision affordance exists on decided events).
@@ -66,22 +76,29 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     path: ROUTES.reports,
-    label: 'Reports',
-    icon: 'reports',
+    label: "Reports",
+    icon: "reports",
     group: NAV_GROUP.RECORDS,
     roles: [ROLE.SAFETY_MANAGER, ROLE.SITE_ADMIN],
   },
   {
+    path: ROUTES.modelTraining,
+    label: "Model training",
+    icon: "training",
+    group: NAV_GROUP.ADMINISTRATION,
+    roles: [ROLE.SITE_ADMIN],
+  },
+  {
     path: ROUTES.config,
-    label: 'Configuration',
-    icon: 'configuration',
+    label: "Configuration",
+    icon: "configuration",
     group: NAV_GROUP.ADMINISTRATION,
     roles: [ROLE.SAFETY_MANAGER, ROLE.SITE_ADMIN],
   },
   {
     path: ROUTES.audit,
-    label: 'Audit log',
-    icon: 'audit',
+    label: "Audit log",
+    icon: "audit",
     group: NAV_GROUP.ADMINISTRATION,
     roles: [ROLE.AUDITOR, ROLE.SAFETY_MANAGER, ROLE.SITE_ADMIN],
   },

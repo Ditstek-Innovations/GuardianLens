@@ -56,6 +56,43 @@ def test_accept_happy_path_writes_event_and_audit_atomically(
     assert str(audit[0][1]) == str(api_seed["reviewer_a"])
 
 
+def test_accept_creates_eligible_structured_training_feedback(
+    client,
+    api_seed,
+    agent_token,
+    reviewer_token,
+    admin_token,
+    tenant_conn,
+):
+    event_id = create_unverified_event(
+        client,
+        api_seed,
+        agent_token,
+        prediction={
+            "class_name": "bottle",
+            "bbox_norm": [0.2, 0.3, 0.6, 0.9],
+        },
+    )
+    response = _decide(
+        client, reviewer_token, event_id, {"decision": "accept", "version": 1}
+    )
+    assert response.status_code == 200, response.text
+
+    sample = tenant_conn.execute(
+        "SELECT decision_type, class_name, bbox_norm, eligible "
+        "FROM training_samples WHERE event_id = %s",
+        (event_id,),
+    ).fetchone()
+    assert sample[0] == "accept"
+    assert sample[1] == "bottle"
+    assert sample[2] == [0.2, 0.3, 0.6, 0.9]
+    assert sample[3] is True
+
+    status = client.get("/api/v1/training-feedback", headers=bearer(admin_token))
+    assert status.status_code == 200, status.text
+    assert status.json()["eligible"] >= 1
+
+
 @pytest.mark.proposed_rule("BR-S-02")
 def test_agent_token_cannot_decide(client, api_seed, agent_token):
     """Bypass row: authenticate as an agent and attempt a decision → 403."""
@@ -174,6 +211,35 @@ def test_reject_with_reason_is_recorded(
         "SELECT status, rejection_reason FROM events WHERE id = %s", (event_id,)
     ).fetchone()
     assert row[0] == "rejected" and row[1] is not None
+
+
+def test_confirmed_false_positive_is_an_eligible_negative_training_sample(
+    client, api_seed, agent_token, reviewer_token, tenant_conn
+):
+    event_id = create_unverified_event(
+        client,
+        api_seed,
+        agent_token,
+        prediction={"class_name": "bottle", "bbox_norm": [0.2, 0.3, 0.6, 0.9]},
+    )
+    response = _decide(
+        client,
+        reviewer_token,
+        event_id,
+        {
+            "decision": "reject",
+            "version": 1,
+            "rejection_reason": "No bottle is present",
+            "training_feedback": "false_positive",
+        },
+    )
+    assert response.status_code == 200, response.text
+    sample = tenant_conn.execute(
+        "SELECT decision_type, class_name, eligible FROM training_samples "
+        "WHERE event_id = %s",
+        (event_id,),
+    ).fetchone()
+    assert sample == ("reject", "bottle", True)
 
 
 def test_correction_retains_original_value(

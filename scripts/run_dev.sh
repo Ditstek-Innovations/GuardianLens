@@ -195,6 +195,9 @@ mkdir -p var
 $VENV/python -m guardian_lens.api &
 (cd web && VITE_API_URL="${VITE_API_URL:-http://localhost:8000}" \
   npx vite --port "$WEB_PORT" --strictPort >../var/web-dev.log 2>&1) &
+if [ "${GL_TRAINING_ENABLED:-0}" = "1" ]; then
+  $VENV/python scripts/training_worker.py >var/training-worker.log 2>&1 &
+fi
 
 sleep 2
 cat <<BANNER
@@ -206,6 +209,7 @@ cat <<BANNER
 
   Feed it events from a simulated site:   make edge-demo
   Web dev-server log:                     var/web-dev.log
+  Training worker:                        ${GL_TRAINING_ENABLED:-0} (var/training-worker.log)
   Stop:                                   Ctrl-C
 
 BANNER

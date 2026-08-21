@@ -1,4 +1,4 @@
-.PHONY: help run edge-demo api web e2e up down migrate-control provision onboard attest bypass unit test coverage lint clean
+.PHONY: help run edge-demo train-feedback training-worker api web e2e up down migrate-control provision onboard attest bypass unit test coverage lint clean
 
 # .env is the single source of truth for local runs. `-include` tolerates
 # its absence; `export` passes everything to child processes so make targets
@@ -11,6 +11,8 @@ help:
 	@echo ""
 	@echo "  make run              ONE COMMAND: db + API (:8000) + review UI (:5173)"
 	@echo "  make edge-demo        feed the running stack events from a simulated site"
+	@echo "  make train-feedback   train a candidate YOLO model from reviewed samples"
+	@echo "  make training-worker  continuously train candidates as feedback accumulates"
 	@echo "  make camera-sim       synthetic RTSP camera at rtsp://localhost:8554/cam1"
 	@echo "  make e2e              the full-workflow test (TRD 20.2 steps 1-4)"
 	@echo ""
@@ -33,6 +35,12 @@ run:
 
 edge-demo:
 	.venv/bin/python scripts/edge_demo.py
+
+train-feedback:
+	.venv/bin/python scripts/train_feedback.py
+
+training-worker:
+	.venv/bin/python scripts/training_worker.py
 
 api:
 	.venv/bin/python -m guardian_lens.api

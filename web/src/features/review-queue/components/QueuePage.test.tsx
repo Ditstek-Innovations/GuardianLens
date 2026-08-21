@@ -39,7 +39,11 @@ const renderQueuePage = () => {
     // toggle stays absent for this role (absent, not disabled).
     <AuthContext.Provider
       value={{
-        principal: { id: 'user-1', fullName: 'A. Reviewer', roles: ['reviewer'] },
+        principal: {
+          id: 'user-1',
+          fullName: 'A. Reviewer',
+          roles: ['reviewer'],
+        },
         restoring: false,
         signIn: async () => undefined,
         signOut: () => undefined,
@@ -133,6 +137,42 @@ describe('QueuePage', () => {
     expect(screen.queryByText(/select all/i)).not.toBeInTheDocument();
   });
 
+  it('requires a reason before rejecting every queued record', async () => {
+    stubQueueApi(
+      makeQueuePage([makeQueueEvent()], 1),
+      makeIncidentsResponse([makeIncidentGroup()]),
+    );
+
+    renderQueuePage();
+    await screen.findByText('Helmet required in Bay 3');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reject all' }));
+    expect(screen.getByRole('dialog', { name: 'Reject all records' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Reject \d+ records/ }));
+    expect(screen.getByText('A rejection reason is required.')).toBeInTheDocument();
+
+    await userEvent.type(
+      screen.getByRole('textbox', { name: /rejection reason/i }),
+      'False positive',
+    );
+    await userEvent.click(screen.getByRole('button', { name: /Reject \d+ records/ }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/events/event-1/decision'),
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            decision: 'reject',
+            rejection_reason: 'False positive',
+            training_feedback: 'exclude',
+            version: 1,
+          }),
+        }),
+      );
+    });
+  });
+
   it('keeps the queue depth visible when the queue is empty', async () => {
     stubQueueApi(makeQueuePage([], 0), makeIncidentsResponse([]));
 
@@ -141,6 +181,7 @@ describe('QueuePage', () => {
     expect(await screen.findByText(/queue clear/i)).toBeInTheDocument();
     expect(screen.getByText(/queue depth: 0/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Accept all' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reject all' })).toBeDisabled();
   });
 
   it('shows why Review is empty from the latest edge snapshot', async () => {

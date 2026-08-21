@@ -1,4 +1,9 @@
+import { useRef } from 'react';
+
 import { Spinner } from '@/components/ui';
+import { formatConfidence } from '@/lib/format/formatConfidence';
+
+import type { SyntheticEvent } from 'react';
 
 export interface EvidenceFrameProps {
   readonly url: string | null;
@@ -7,6 +12,11 @@ export interface EvidenceFrameProps {
   readonly alt: string;
   readonly onLoaded: () => void;
   readonly onFailed: () => void;
+  readonly prediction?: {
+    readonly className: string;
+    readonly confidence: number;
+    readonly bbox: readonly [number, number, number, number];
+  } | null;
 }
 
 const ImageOffIcon = () => (
@@ -47,7 +57,10 @@ export const EvidenceFrame = ({
   alt,
   onLoaded,
   onFailed,
+  prediction = null,
 }: EvidenceFrameProps) => {
+  const zoomCanvasRef = useRef<HTMLCanvasElement>(null);
+
   if (isError) {
     // CS-Y-13 — the failure is a designed state, never a broken image.
     return (
@@ -69,11 +82,44 @@ export const EvidenceFrame = ({
     );
   }
 
+  const handleImageLoaded = (event: SyntheticEvent<HTMLImageElement>): void => {
+    if (prediction !== null && zoomCanvasRef.current !== null) {
+      const image = event.currentTarget;
+      const [x1, y1, x2, y2] = prediction.bbox;
+      const sourceX = Math.max(0, Math.round(x1 * image.naturalWidth));
+      const sourceY = Math.max(0, Math.round(y1 * image.naturalHeight));
+      const sourceWidth = Math.max(
+        1,
+        Math.min(image.naturalWidth - sourceX, Math.round((x2 - x1) * image.naturalWidth)),
+      );
+      const sourceHeight = Math.max(
+        1,
+        Math.min(image.naturalHeight - sourceY, Math.round((y2 - y1) * image.naturalHeight)),
+      );
+      const canvas = zoomCanvasRef.current;
+      canvas.width = sourceWidth;
+      canvas.height = sourceHeight;
+      const context = canvas.getContext('2d');
+      context?.drawImage(
+        image,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        sourceWidth,
+        sourceHeight,
+      );
+    }
+    onLoaded();
+  };
+
   if (isPending || url === null) {
     return (
       <div
         aria-label="Loading evidence frame"
-        className="flex aspect-video items-center justify-center rounded-card border border-border bg-checker shadow-ambient"
+        className="bg-checker flex aspect-video items-center justify-center rounded-card border border-border shadow-ambient"
       >
         <span className="flex items-center gap-2 rounded-full bg-surface-1 px-4 py-2 text-sm text-fg-muted">
           <Spinner />
@@ -86,12 +132,46 @@ export const EvidenceFrame = ({
   // CS-P-03 — fixed aspect box so the decision bar does not shift as the
   // image lands. CS-A-07 — alt states camera, zone and timestamp.
   return (
-    <img
-      src={url}
-      alt={alt}
-      onLoad={onLoaded}
-      onError={onFailed}
-      className="aspect-video w-full rounded-card border border-border bg-checker object-contain shadow-ambient"
-    />
+    <div className="bg-checker relative aspect-video w-full overflow-hidden rounded-card border border-border shadow-ambient">
+      <img
+        src={url}
+        alt={alt}
+        onLoad={handleImageLoaded}
+        onError={onFailed}
+        className="h-full w-full object-contain"
+      />
+      {prediction !== null ? (
+        <div
+          aria-label={`${prediction.className} prediction`}
+          className="pointer-events-none absolute border-2 border-ok shadow-glow"
+          style={{
+            left: `${prediction.bbox[0] * 100}%`,
+            top: `${prediction.bbox[1] * 100}%`,
+            width: `${(prediction.bbox[2] - prediction.bbox[0]) * 100}%`,
+            height: `${(prediction.bbox[3] - prediction.bbox[1]) * 100}%`,
+          }}
+        >
+          <span className="absolute bottom-full left-[-2px] bg-ok-solid px-1.5 py-0.5 text-xs font-semibold text-white">
+            {prediction.className} · {formatConfidence(prediction.confidence)}
+          </span>
+        </div>
+      ) : null}
+      {prediction !== null ? (
+        <div className="pointer-events-none absolute right-3 top-3 w-40 overflow-hidden rounded-control border-2 border-ok bg-black shadow-modal sm:w-56">
+          <div className="flex items-center justify-between gap-2 bg-ok-solid px-2 py-1 text-xs font-semibold text-white">
+            <span className="truncate">Zoom · {prediction.className}</span>
+            <span className="shrink-0 tabular-nums">
+              {formatConfidence(prediction.confidence)}
+            </span>
+          </div>
+          <canvas
+            ref={zoomCanvasRef}
+            role="img"
+            aria-label={`Magnified ${prediction.className} detection`}
+            className="block max-h-44 w-full bg-black object-contain"
+          />
+        </div>
+      ) : null}
+    </div>
   );
 };

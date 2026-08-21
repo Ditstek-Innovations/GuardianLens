@@ -7,4 +7,5 @@ export const configKeys = {
   rules: () => [...configKeys.all, 'rules'] as const,
   agents: () => [...configKeys.all, 'agents'] as const,
   models: () => [...configKeys.all, 'models'] as const,
+  trainingFeedback: () => [...configKeys.all, 'training-feedback'] as const,
 };

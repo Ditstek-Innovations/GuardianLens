@@ -16,6 +16,8 @@ comparison (IF-X1: pull-only with bounded staleness).
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -39,6 +41,7 @@ from guardian_lens.schemas.config import (
     CameraResponse,
     ModelVersionCreate,
     ModelVersionResponse,
+    TrainingFeedbackResponse,
     RuleCreate,
     RulePatch,
     RuleResponse,
@@ -50,6 +53,7 @@ from guardian_lens.schemas.config import (
 )
 from guardian_lens.services.audit import AuditService
 from guardian_lens.services.configuration import ConfigurationService
+from guardian_lens.repositories.events import EventRepository
 from guardian_lens.tenancy.context import TenantContext
 
 router = APIRouter(tags=["config"])
@@ -338,6 +342,50 @@ def delete_agent(
 
 
 # -- model versions (gate G1 evidence trail) ---------------------------------
+
+
+@router.get("/training-feedback", response_model=TrainingFeedbackResponse)
+def training_feedback(
+    principal: HumanPrincipal = Depends(require_site_admin),
+    context: TenantContext = Depends(get_tenant_context),
+) -> TrainingFeedbackResponse:
+    summary = EventRepository(context.session).training_feedback_summary(
+        principal.site_ids()
+    )
+    worker: dict[str, Any] = {"state": "not_started"}
+    status_path = Path("var/training/status.json")
+    if status_path.is_file():
+        try:
+            loaded = json.loads(status_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                worker = loaded
+        except (OSError, ValueError):
+            worker = {"state": "unavailable", "detail": "Training status is unreadable."}
+    return TrainingFeedbackResponse(
+        **summary,
+        worker_state=str(worker.get("state", "unknown")),
+        worker_detail=(str(worker["detail"]) if worker.get("detail") else None),
+        dataset_hash=(str(worker["dataset_hash"]) if worker.get("dataset_hash") else None),
+        candidate_path=(str(worker["candidate_path"]) if worker.get("candidate_path") else None),
+        deployed=worker.get("deployed") is True,
+        minimum_samples=int(worker.get("minimum_samples", 20)),
+        current_epoch=(
+            int(worker["current_epoch"])
+            if worker.get("current_epoch") is not None
+            else None
+        ),
+        total_epochs=(
+            int(worker["total_epochs"])
+            if worker.get("total_epochs") is not None
+            else None
+        ),
+        progress_percent=(
+            float(worker["progress_percent"])
+            if worker.get("progress_percent") is not None
+            else None
+        ),
+        updated_at=worker.get("updated_at"),
+    )
 
 
 @router.get("/model-versions", response_model=list[ModelVersionResponse])

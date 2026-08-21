@@ -211,6 +211,23 @@ class ModelVersionResponse(BaseModel):
     notes: str | None
 
 
+class TrainingFeedbackResponse(BaseModel):
+    reviewed: int
+    eligible: int
+    excluded: int
+    by_class: dict[str, int]
+    worker_state: str
+    worker_detail: str | None = None
+    dataset_hash: str | None = None
+    candidate_path: str | None = None
+    deployed: bool = False
+    minimum_samples: int = 20
+    current_epoch: int | None = None
+    total_epochs: int | None = None
+    progress_percent: float | None = None
+    updated_at: datetime | None = None
+
+
 # -- camera discovery ---
 
 class CameraDiscoveryCandidateResponse(BaseModel):

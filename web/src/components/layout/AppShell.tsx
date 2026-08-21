@@ -1,20 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useEffect, useRef, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
-import { ThemeToggle } from '@/components/layout/ThemeToggle';
-import { Button, Logo, Modal, ToastProvider } from '@/components/ui';
-import { NAV_GROUP_ORDER, NAV_ITEMS } from '@/constants/navigation';
-import { ROUTES } from '@/constants/routes';
-import { useQueueQuery } from '@/features/review-queue';
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { Button, Logo, Modal, ToastProvider } from "@/components/ui";
+import { NAV_GROUP_ORDER, NAV_ITEMS } from "@/constants/navigation";
+import { ROUTES } from "@/constants/routes";
+import { useQueueQuery } from "@/features/review-queue";
 import {
   playReviewAlertSound,
   unlockReviewAlertSound,
-} from '@/features/review-queue/lib/reviewAlertSound';
-import { useAuth } from '@/hooks/useAuth';
-import { cn } from '@/lib/utils/cn';
+} from "@/features/review-queue/lib/reviewAlertSound";
+import { useAuth } from "@/hooks/useAuth";
+import { cn } from "@/lib/utils/cn";
 
-import type { ReactElement } from 'react';
-import type { NavIconName, NavItem } from '@/constants/navigation';
+import type { ReactElement } from "react";
+import type { NavIconName, NavItem } from "@/constants/navigation";
 
 const MenuIcon = () => (
   <svg
@@ -37,17 +37,17 @@ const MenuIcon = () => (
 // nav declaration (CS-SH-02), the geometry lives here with the shell. ───────
 
 const navIconProps = {
-  'aria-hidden': true,
+  "aria-hidden": true,
   focusable: false,
   width: 16,
   height: 16,
-  viewBox: '0 0 24 24',
-  fill: 'none',
-  stroke: 'currentColor',
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
   strokeWidth: 1.8,
-  strokeLinecap: 'round',
-  strokeLinejoin: 'round',
-  className: 'shrink-0',
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  className: "shrink-0",
 } as const;
 
 const QueueIcon = () => (
@@ -85,6 +85,13 @@ const ConfigurationIcon = () => (
   </svg>
 );
 
+const TrainingIcon = () => (
+  <svg {...navIconProps}>
+    <path d="M9 3h6v3H9zM7 6h10a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" />
+    <path d="M9 11h.01M15 11h.01M9 15h6" />
+  </svg>
+);
+
 const AuditIcon = () => (
   <svg {...navIconProps}>
     <path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
@@ -106,6 +113,7 @@ const NAV_ICONS: Record<NavIconName, () => ReactElement> = {
   live: LiveIcon,
   history: HistoryIcon,
   reports: ReportsIcon,
+  training: TrainingIcon,
   configuration: ConfigurationIcon,
   audit: AuditIcon,
 };
@@ -120,7 +128,7 @@ const QueueDepthChip = ({ depth }: { readonly depth: number | undefined }) => (
     aria-live="polite"
     className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-brand-subtle px-3 py-1 text-xs font-medium text-brand-ink"
   >
-    <span className="text-sm font-semibold tabular-nums">{depth ?? '—'}</span>
+    <span className="text-sm font-semibold tabular-nums">{depth ?? "—"}</span>
     <span>awaiting review</span>
   </span>
 );
@@ -139,11 +147,11 @@ const SoundOffIcon = () => (
   </svg>
 );
 
-const SOUND_ENABLED_KEY = 'guardian-lens.review-sound-enabled';
+const SOUND_ENABLED_KEY = "guardian-lens.review-sound-enabled";
 
 const initialSoundEnabled = (): boolean => {
-  if (typeof window === 'undefined') return true;
-  return window.localStorage.getItem(SOUND_ENABLED_KEY) !== 'false';
+  if (typeof window === "undefined") return true;
+  return window.localStorage.getItem(SOUND_ENABLED_KEY) !== "false";
 };
 
 // ─── Principal menu (CS-SH-09) ────────────────────────────────────────────
@@ -164,8 +172,8 @@ const SignOutDialog = ({
   <Modal title="Sign out" onClose={onCancel}>
     <div className="space-y-4">
       <p className="text-sm text-fg">
-        Your session on this device ends now. Any draft decision saved on this device is cleared
-        with it.
+        Your session on this device ends now. Any draft decision saved on this
+        device is cleared with it.
       </p>
       <div className="flex justify-end gap-3">
         <Button variant="ghost" onClick={onCancel}>
@@ -194,26 +202,29 @@ const PrincipalMenu = ({
   useEffect(() => {
     if (!isOpen) return undefined;
     const handlePointerDown = (event: PointerEvent): void => {
-      if (containerRef.current !== null && !containerRef.current.contains(event.target as Node)) {
+      if (
+        containerRef.current !== null &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false);
       }
     };
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setIsOpen(false);
+      if (event.key === "Escape") setIsOpen(false);
     };
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isOpen]);
 
   const initials = fullName
-    .split(' ')
+    .split(" ")
     .map((part) => part.charAt(0))
     .slice(0, 2)
-    .join('')
+    .join("")
     .toUpperCase();
 
   return (
@@ -251,7 +262,10 @@ const PrincipalMenu = ({
         </div>
       ) : null}
       {isConfirmingSignOut ? (
-        <SignOutDialog onConfirm={onSignOut} onCancel={() => setIsConfirmingSignOut(false)} />
+        <SignOutDialog
+          onConfirm={onSignOut}
+          onCancel={() => setIsConfirmingSignOut(false)}
+        />
       ) : null}
     </div>
   );
@@ -261,10 +275,12 @@ const PrincipalMenu = ({
 
 const navLinkClass = ({ isActive }: { isActive: boolean }): string =>
   cn(
-    'group flex items-center gap-2.5 rounded-control px-2.5 py-2 text-sm font-medium',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2',
-    'motion-safe:transition-colors motion-safe:duration-120 motion-safe:ease-out',
-    isActive ? 'bg-brand-subtle text-brand-ink' : 'text-fg-muted hover:bg-surface-2 hover:text-fg',
+    "group flex items-center gap-2.5 rounded-control px-2.5 py-2 text-sm font-medium",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2",
+    "motion-safe:transition-colors motion-safe:duration-120 motion-safe:ease-out",
+    isActive
+      ? "bg-brand-subtle text-brand-ink"
+      : "text-fg-muted hover:bg-surface-2 hover:text-fg",
   );
 
 const NavGroups = ({
@@ -300,7 +316,7 @@ const NavGroups = ({
                         aria-hidden="true"
                         className="ml-auto rounded-full bg-surface-3 px-2 py-0.5 text-xs font-semibold tabular-nums text-fg-muted"
                       >
-                        {queueDepth ?? '—'}
+                        {queueDepth ?? "—"}
                       </span>
                     ) : null}
                   </NavLink>
@@ -317,7 +333,7 @@ const NavGroups = ({
 // ─── Mobile drawer (CS-SH-04) — traps focus, closes on Escape and on
 // navigation; the depth indicator stays in the header, never inside. ──────
 
-const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled])';
+const FOCUSABLE_SELECTOR = "a[href], button:not([disabled])";
 
 const NavDrawer = ({
   items,
@@ -332,19 +348,22 @@ const NavDrawer = ({
 
   useEffect(() => {
     const previouslyFocused =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     const panel = panelRef.current;
     if (panel === null) return undefined;
     panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)[0]?.focus();
 
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         event.preventDefault();
         onClose();
         return;
       }
-      if (event.key !== 'Tab') return;
-      const focusables = panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+      if (event.key !== "Tab") return;
+      const focusables =
+        panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       if (first === undefined || last === undefined) return;
@@ -356,9 +375,9 @@ const NavDrawer = ({
         first.focus();
       }
     };
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown);
       previouslyFocused?.focus();
     };
   }, [onClose]);
@@ -391,7 +410,8 @@ export const AppShell = () => {
   const { principal, signOut } = useAuth();
   const location = useLocation();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [isReviewSoundEnabled, setIsReviewSoundEnabled] = useState(initialSoundEnabled);
+  const [isReviewSoundEnabled, setIsReviewSoundEnabled] =
+    useState(initialSoundEnabled);
   const previousQueueIdsRef = useRef<Set<string> | null>(null);
 
   // One queue subscription for the whole shell — the header chip and the
@@ -406,11 +426,11 @@ export const AppShell = () => {
   useEffect(() => {
     if (!isReviewSoundEnabled) return undefined;
     const unlock = (): void => unlockReviewAlertSound();
-    window.addEventListener('pointerdown', unlock, { once: true });
-    window.addEventListener('keydown', unlock, { once: true });
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
     return () => {
-      window.removeEventListener('pointerdown', unlock);
-      window.removeEventListener('keydown', unlock);
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
     };
   }, [isReviewSoundEnabled]);
 
@@ -499,10 +519,16 @@ export const AppShell = () => {
               type="button"
               onClick={toggleReviewSound}
               aria-label={
-                isReviewSoundEnabled ? 'Mute new review sounds' : 'Enable new review sounds'
+                isReviewSoundEnabled
+                  ? "Mute new review sounds"
+                  : "Enable new review sounds"
               }
               aria-pressed={isReviewSoundEnabled}
-              title={isReviewSoundEnabled ? 'New review sound is on' : 'New review sound is off'}
+              title={
+                isReviewSoundEnabled
+                  ? "New review sound is on"
+                  : "New review sound is off"
+              }
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
             >
               {isReviewSoundEnabled ? <SoundOnIcon /> : <SoundOffIcon />}

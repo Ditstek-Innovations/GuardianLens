@@ -1,40 +1,43 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { StatusChip } from '@/components/StatusChip';
-import { PageHeading } from '@/components/layout/PageHeading';
-import { Button, Chip, ErrorState, Skeleton } from '@/components/ui';
-import { EVENT_STATUS } from '@/constants/events';
-import { MESSAGES } from '@/constants/messages';
-import { DECIDING_ROLES } from '@/constants/roles';
-import { ROUTES } from '@/constants/routes';
-import { CONFLICT_ADVANCE_DELAY_MS, DELAYED_EVENT_THRESHOLD_MS } from '@/constants/time';
-import { flattenQueueItems, useQueueQuery } from '@/features/review-queue';
-import { useAuth } from '@/hooks/useAuth';
-import { usePageTitle } from '@/hooks/usePageTitle';
-import { useSessionDraft } from '@/hooks/useSessionDraft';
-import { useToast } from '@/hooks/useToast';
-import { ApiError } from '@/lib/api/errors';
-import { formatConfidence } from '@/lib/format/formatConfidence';
-import { formatDurationMs } from '@/lib/format/formatDurationMs';
-import { formatTimestamp } from '@/lib/format/formatTimestamp';
-import { assertNever } from '@/lib/utils/assertNever';
+import { StatusChip } from "@/components/StatusChip";
+import { PageHeading } from "@/components/layout/PageHeading";
+import { Button, Chip, ErrorState, Skeleton } from "@/components/ui";
+import { EVENT_STATUS } from "@/constants/events";
+import { MESSAGES } from "@/constants/messages";
+import { DECIDING_ROLES } from "@/constants/roles";
+import { ROUTES } from "@/constants/routes";
+import {
+  CONFLICT_ADVANCE_DELAY_MS,
+  DELAYED_EVENT_THRESHOLD_MS,
+} from "@/constants/time";
+import { flattenQueueItems, useQueueQuery } from "@/features/review-queue";
+import { useAuth } from "@/hooks/useAuth";
+import { usePageTitle } from "@/hooks/usePageTitle";
+import { useSessionDraft } from "@/hooks/useSessionDraft";
+import { useToast } from "@/hooks/useToast";
+import { ApiError } from "@/lib/api/errors";
+import { formatConfidence } from "@/lib/format/formatConfidence";
+import { formatDurationMs } from "@/lib/format/formatDurationMs";
+import { formatTimestamp } from "@/lib/format/formatTimestamp";
+import { assertNever } from "@/lib/utils/assertNever";
 
-import { useEventQuery } from '../api/useEventQuery';
-import { useCorrectionOptions } from '../api/useCorrectionOptions';
-import { useEvidence } from '../api/useEvidence';
-import { useSubmitDecision } from '../api/useSubmitDecision';
-import { CorrectionForm } from './CorrectionForm';
-import { DecisionBar } from './DecisionBar';
-import { EvidenceFrame } from './EvidenceFrame';
-import { RejectionReasonDialog } from './RejectionReasonDialog';
+import { useEventQuery } from "../api/useEventQuery";
+import { useCorrectionOptions } from "../api/useCorrectionOptions";
+import { useEvidence } from "../api/useEvidence";
+import { useSubmitDecision } from "../api/useSubmitDecision";
+import { CorrectionForm } from "./CorrectionForm";
+import { DecisionBar } from "./DecisionBar";
+import { EvidenceFrame } from "./EvidenceFrame";
+import { RejectionReasonDialog } from "./RejectionReasonDialog";
 
-import type { ReactNode } from 'react';
-import type { DecisionIntent } from './DecisionBar';
-import type { DecisionResponse } from '@/lib/api/types';
-import type { Decision, FieldCorrection } from '@/types/decision';
+import type { ReactNode } from "react";
+import type { DecisionIntent } from "./DecisionBar";
+import type { DecisionResponse } from "@/lib/api/types";
+import type { Decision, FieldCorrection } from "@/types/decision";
 
-type DialogState = 'none' | 'reject' | 'correct';
+type DialogState = "none" | "reject" | "correct";
 
 interface ConflictState {
   readonly existing: DecisionResponse | null;
@@ -45,10 +48,13 @@ interface ConflictState {
 // payload, so it is additive there). The top-level spelling is kept as a
 // fallback; absence still degrades gracefully.
 const extractExistingDecision = (body: unknown): DecisionResponse | null => {
-  if (typeof body !== 'object' || body === null) return null;
-  const record = body as { existing_decision?: unknown; error?: { existing_decision?: unknown } };
+  if (typeof body !== "object" || body === null) return null;
+  const record = body as {
+    existing_decision?: unknown;
+    error?: { existing_decision?: unknown };
+  };
   const existing = record.error?.existing_decision ?? record.existing_decision;
-  if (typeof existing !== 'object' || existing === null) return null;
+  if (typeof existing !== "object" || existing === null) return null;
   return existing as DecisionResponse;
 };
 
@@ -98,8 +104,10 @@ const Detail = ({
   value: ReactNode;
   wide?: boolean;
 }) => (
-  <div className={wide ? 'sm:col-span-2' : undefined}>
-    <dt className="text-xs font-medium uppercase tracking-wide text-fg-muted">{label}</dt>
+  <div className={wide ? "sm:col-span-2" : undefined}>
+    <dt className="text-xs font-medium uppercase tracking-wide text-fg-muted">
+      {label}
+    </dt>
     <dd className="mt-0.5 text-sm tabular-nums text-fg">{value}</dd>
   </div>
 );
@@ -107,16 +115,21 @@ const Detail = ({
 export const EventDetailPage = () => {
   // Route params are external input (CS-RT-02 / CS-G-13).
   const params = useParams<{ eventId: string }>();
-  const eventId = params.eventId ?? '';
-  if (eventId === '') {
-    return <ErrorState title="Candidate not found." detail="The address has no candidate id." />;
+  const eventId = params.eventId ?? "";
+  if (eventId === "") {
+    return (
+      <ErrorState
+        title="Candidate not found."
+        detail="The address has no candidate id."
+      />
+    );
   }
   // key resets all per-candidate state (evidence gate, dialogs) on navigation.
   return <EventDetailView key={eventId} eventId={eventId} />;
 };
 
 const EventDetailView = ({ eventId }: { eventId: string }) => {
-  usePageTitle('Candidate detail');
+  usePageTitle("Candidate detail");
   const navigate = useNavigate();
   const { principal } = useAuth();
   const eventQuery = useEventQuery(eventId);
@@ -127,20 +140,24 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
   const { draft, setDraft, clearDraft } = useSessionDraft(eventId);
   const { showToast } = useToast();
 
-  const [dialog, setDialog] = useState<DialogState>('none');
+  const [dialog, setDialog] = useState<DialogState>("none");
   const [isFrameRendered, setIsFrameRendered] = useState(false);
   const [hasFrameFailed, setHasFrameFailed] = useState(false);
   const [conflict, setConflict] = useState<ConflictState | null>(null);
-  const correctionOptions = useCorrectionOptions(eventId, dialog === 'correct');
+  const correctionOptions = useCorrectionOptions(eventId, dialog === "correct");
 
-  const queueItems = queueQuery.data === undefined ? [] : flattenQueueItems(queueQuery.data.pages);
+  const queueItems =
+    queueQuery.data === undefined
+      ? []
+      : flattenQueueItems(queueQuery.data.pages);
   const currentIndex = queueItems.findIndex((item) => item.id === eventId);
   // Opened from an incident group: walk that incident's members in order,
   // one decision each (BR-V-02 — grouping never changes how many acts a
   // disposition takes, only what the queue LIST shows).
   const location = useLocation();
   const incidentEventIds =
-    (location.state as { incidentEventIds?: string[] } | null)?.incidentEventIds ?? null;
+    (location.state as { incidentEventIds?: string[] } | null)
+      ?.incidentEventIds ?? null;
   const incidentIndex = incidentEventIds?.indexOf(eventId) ?? -1;
   const nextInIncident =
     incidentEventIds !== null && incidentIndex >= 0
@@ -202,7 +219,9 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
 
   const event = eventQuery.data;
   const isDecided = event.status !== EVENT_STATUS.UNVERIFIED;
-  const canDecide = principal !== null && principal.roles.some((role) => DECIDING_ROLES.includes(role));
+  const canDecide =
+    principal !== null &&
+    principal.roles.some((role) => DECIDING_ROLES.includes(role));
 
   // ADR-013 / F-6 — the gate: fetched AND rendered, with failure explicit.
   const isEvidenceBlocked = evidence.isError || hasFrameFailed;
@@ -213,7 +232,8 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
     receivedAt === undefined
       ? 0
       : new Date(receivedAt).getTime() - new Date(event.occurred_at).getTime();
-  const isDelayed = Number.isFinite(delayMs) && delayMs > DELAYED_EVENT_THRESHOLD_MS;
+  const isDelayed =
+    Number.isFinite(delayMs) && delayMs > DELAYED_EVENT_THRESHOLD_MS;
 
   const evidenceAlt = `Evidence frame — ${event.camera.name}, ${event.zone.name}, ${formatTimestamp(
     event.occurred_at,
@@ -231,11 +251,11 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
   // the attribution (BR-005), a reject names the retention (BR-007).
   const successMessageFor = (decision: Decision): string => {
     switch (decision.type) {
-      case 'accept':
+      case "accept":
         return MESSAGES.decision.accepted;
-      case 'reject':
+      case "reject":
         return MESSAGES.decision.rejected;
-      case 'correct':
+      case "correct":
         return MESSAGES.decision.corrected;
       default:
         return assertNever(decision);
@@ -248,19 +268,19 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
       {
         onSuccess: () => {
           clearDraft();
-          setDialog('none');
-          showToast({ tone: 'success', message: successMessageFor(decision) });
+          setDialog("none");
+          showToast({ tone: "success", message: successMessageFor(decision) });
           goToNext();
         },
         onError: (error) => {
           if (error instanceof ApiError && error.status === 409) {
-            setDialog('none');
+            setDialog("none");
             setConflict({ existing: extractExistingDecision(error.body) });
             // Informational, not actionable — first decision wins (BR-V-04).
-            showToast({ tone: 'notice', message: MESSAGES.decision.conflict });
+            showToast({ tone: "notice", message: MESSAGES.decision.conflict });
           } else {
             // CS-MSG-05 — next step stated; no status codes, no error text.
-            showToast({ tone: 'failure', message: MESSAGES.decision.failed });
+            showToast({ tone: "failure", message: MESSAGES.decision.failed });
           }
         },
       },
@@ -269,14 +289,14 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
 
   const handleIntent = (intent: DecisionIntent): void => {
     switch (intent) {
-      case 'accept':
-        submit({ type: 'accept' });
+      case "accept":
+        submit({ type: "accept" });
         break;
-      case 'reject':
-        setDialog('reject');
+      case "reject":
+        setDialog("reject");
         break;
-      case 'correct':
-        setDialog('correct');
+      case "correct":
+        setDialog("correct");
         break;
       default:
         assertNever(intent);
@@ -284,17 +304,17 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
   };
 
   const handleRejectSubmit = (reason: string): void => {
-    submit({ type: 'reject', reason });
+    submit({ type: "reject", reason });
   };
   const handleCorrectSubmit = (correction: FieldCorrection): void => {
-    submit({ type: 'correct', correction });
+    submit({ type: "correct", correction });
   };
   const handleRejectCancel = (): void => {
-    setDialog('none');
+    setDialog("none");
     clearDraft(); // abandoned draft — CS-FM-08
   };
   const handleDialogClose = (): void => {
-    setDialog('none');
+    setDialog("none");
   };
 
   let decisionArea: ReactNode;
@@ -302,37 +322,39 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
     // CS-B-07 — no edit affordance on a decided event. BR-005 — the
     // decision is shown WITH its reviewer, type and timestamp.
     const DECISION_LABEL: Record<string, string> = {
-      accept: 'Accepted',
-      reject: 'Rejected',
-      correct: 'Corrected',
+      accept: "Accepted",
+      reject: "Rejected",
+      correct: "Corrected",
     };
-    const decisionLabel = DECISION_LABEL[event.decision_type ?? ''] ?? event.status;
+    const decisionLabel =
+      DECISION_LABEL[event.decision_type ?? ""] ?? event.status;
     decisionArea = (
       <div className="space-y-3 rounded-card border border-border bg-surface-1 p-4 shadow-ambient">
         <h3 className="text-sm font-semibold text-fg">Decision</h3>
         <dl className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-3">
           <Detail label="Outcome" value={decisionLabel} />
-          <Detail
-            label="Decided by"
-            value={event.reviewer?.full_name ?? '—'}
-          />
+          <Detail label="Decided by" value={event.reviewer?.full_name ?? "—"} />
           <Detail
             label="Decided at (site time)"
             value={
               event.decided_at != null
                 ? formatTimestamp(event.decided_at, event.site_timezone)
-                : '—'
+                : "—"
             }
           />
           {event.rejection_reason != null ? (
-            <Detail wide label="Rejection reason" value={event.rejection_reason} />
+            <Detail
+              wide
+              label="Rejection reason"
+              value={event.rejection_reason}
+            />
           ) : null}
         </dl>
         <p className="flex items-start gap-2 text-xs text-fg-muted">
           <InfoIcon />
           <span>
-            Decisions are immutable (BR-V-01); a reviewer error is addressed by a new correcting
-            record, never by editing this one.
+            Decisions are immutable (BR-V-01); a reviewer error is addressed by
+            a new correcting record, never by editing this one.
           </span>
         </p>
       </div>
@@ -378,27 +400,47 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
         alt={evidenceAlt}
         onLoaded={handleFrameLoaded}
         onFailed={handleFrameFailed}
+        prediction={
+          event.predicted_class != null && event.predicted_bbox != null
+            ? {
+                className: event.predicted_class,
+                confidence: event.confidence,
+                bbox: event.predicted_bbox,
+              }
+            : null
+        }
       />
 
       {isDelayed ? (
         // ADR-007 — replayed events show their true observation time visibly.
         <Chip variant="warn" icon={<ClockIcon />} className="tabular-nums">
-          Delayed observation — occurred {formatDurationMs(delayMs)} before receipt
+          Delayed observation — occurred {formatDurationMs(delayMs)} before
+          receipt
         </Chip>
       ) : null}
 
       <dl className="grid grid-cols-1 gap-x-8 gap-y-3 rounded-card border border-border bg-surface-1 p-4 shadow-ambient sm:grid-cols-2">
-        <Detail label="Camera · Zone" value={`${event.camera.name} · ${event.zone.name}`} />
+        <Detail
+          label="Camera · Zone"
+          value={`${event.camera.name} · ${event.zone.name}`}
+        />
         <Detail
           label="Occurred at (site time)"
           value={formatTimestamp(event.occurred_at, event.site_timezone)}
         />
         <Detail
           label="Received at"
-          value={receivedAt === undefined ? '—' : formatTimestamp(receivedAt, event.site_timezone)}
+          value={
+            receivedAt === undefined
+              ? "—"
+              : formatTimestamp(receivedAt, event.site_timezone)
+          }
         />
         {/* BR-V-03 — an annotation for attention, never an input to the decision. */}
-        <Detail label="Confidence (annotation only)" value={formatConfidence(event.confidence)} />
+        <Detail
+          label="Confidence (annotation only)"
+          value={formatConfidence(event.confidence)}
+        />
         <Detail
           wide
           label="Rule as it fired (snapshot)"
@@ -409,16 +451,24 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
       {conflict !== null ? (
         <div className="rounded-card border border-warn bg-warn-subtle p-4">
           <p className="font-medium text-warn">
-            Already decided by {conflict.existing?.reviewer.full_name ?? 'another reviewer'}
+            Already decided by{" "}
+            {conflict.existing?.reviewer.full_name ?? "another reviewer"}
             {conflict.existing !== null
               ? ` — ${conflict.existing.decision_type} at ${formatTimestamp(
                   conflict.existing.decided_at,
                   event.site_timezone,
                 )}`
-              : ''}
+              : ""}
           </p>
-          <p className="mt-1 text-sm text-warn">Moving to the next candidate…</p>
-          <Button variant="secondary" size="sm" className="mt-3" onClick={goToNext}>
+          <p className="mt-1 text-sm text-warn">
+            Moving to the next candidate…
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            onClick={goToNext}
+          >
             Next candidate
           </Button>
         </div>
@@ -426,7 +476,7 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
 
       {decisionArea}
 
-      {dialog === 'reject' ? (
+      {dialog === "reject" ? (
         <RejectionReasonDialog
           draft={draft}
           onDraftChange={setDraft}
@@ -435,7 +485,7 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
           onCancel={handleRejectCancel}
         />
       ) : null}
-      {dialog === 'correct' ? (
+      {dialog === "correct" ? (
         <CorrectionForm
           event={event}
           isSubmitting={submitDecision.isPending}
@@ -445,7 +495,6 @@ const EventDetailView = ({ eventId }: { eventId: string }) => {
           onCancel={handleDialogClose}
         />
       ) : null}
-
     </article>
   );
 };

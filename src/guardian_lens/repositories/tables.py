@@ -158,6 +158,8 @@ events = sa.Table(
     sa.Column("agent_id", _uuid),
     sa.Column("model_version_id", _uuid),
     sa.Column("confidence", sa.Numeric(4, 3)),
+    sa.Column("predicted_class", sa.String(100)),
+    sa.Column("predicted_bbox", JSONB),
     sa.Column("occurred_at", _ts),
     sa.Column("received_at", _ts),
     sa.Column("evidence_ref", sa.Text),
@@ -182,6 +184,21 @@ event_corrections = sa.Table(
     sa.Column("corrected_value", sa.Text),
     sa.Column("corrected_by", _uuid),
     sa.Column("corrected_at", _ts),
+)
+
+training_samples = sa.Table(
+    "training_samples",
+    metadata,
+    sa.Column("id", _uuid, primary_key=True, server_default=_DB_GENERATED),
+    sa.Column("event_id", _uuid),
+    sa.Column("site_id", _uuid),
+    sa.Column("decision_type", sa.String(20)),
+    sa.Column("class_name", sa.String(100)),
+    sa.Column("bbox_norm", JSONB),
+    sa.Column("eligible", sa.Boolean),
+    sa.Column("reviewed_by", _uuid),
+    sa.Column("reviewed_at", _ts),
+    sa.Column("created_at", _ts),
 )
 
 coverage_gaps = sa.Table(

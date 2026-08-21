@@ -1,19 +1,25 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes } from "react-router-dom";
 
-import { AppShell } from '@/components/layout/AppShell';
-import { ROLE } from '@/constants/roles';
-import { ROUTE_PATTERNS, ROUTES } from '@/constants/routes';
-import { AuditPage } from '@/features/audit';
-import { ForgotPasswordPage, LoginPage, ResetPasswordPage, SignupPage } from '@/features/auth';
-import { ConfigPage } from '@/features/config';
-import { EventDetailPage } from '@/features/event-detail';
-import { HistoryPage } from '@/features/event-history';
-import { LiveFeedingPage } from '@/features/live-feeding';
-import { QueuePage } from '@/features/review-queue';
-import { ReportsPage } from '@/features/reports';
-import { CameraDiscovery } from '@/features/cameras';
+import { AppShell } from "@/components/layout/AppShell";
+import { ROLE } from "@/constants/roles";
+import { ROUTE_PATTERNS, ROUTES } from "@/constants/routes";
+import { AuditPage } from "@/features/audit";
+import {
+  ForgotPasswordPage,
+  LoginPage,
+  ResetPasswordPage,
+  SignupPage,
+} from "@/features/auth";
+import { ConfigPage } from "@/features/config";
+import { EventDetailPage } from "@/features/event-detail";
+import { HistoryPage } from "@/features/event-history";
+import { LiveFeedingPage } from "@/features/live-feeding";
+import { QueuePage } from "@/features/review-queue";
+import { ReportsPage } from "@/features/reports";
+import { ModelTrainingPage } from "@/features/model-training";
+import { CameraDiscovery } from "@/features/cameras";
 
-import { RequireAuth, RequireRole } from './guards';
+import { RequireAuth, RequireRole } from "./guards";
 
 /*
  * ───────────────────────────────────────────────────────────────────────────
@@ -124,6 +130,14 @@ export const AppRouter = () => (
         }
       />
       <Route
+        path={ROUTES.modelTraining}
+        element={
+          <RequireRole roles={[ROLE.SITE_ADMIN]}>
+            <ModelTrainingPage />
+          </RequireRole>
+        }
+      />
+      <Route
         path={ROUTES.config}
         element={
           <RequireRole roles={[ROLE.SAFETY_MANAGER, ROLE.SITE_ADMIN]}>
@@ -134,7 +148,9 @@ export const AppRouter = () => (
       <Route
         path={ROUTES.audit}
         element={
-          <RequireRole roles={[ROLE.AUDITOR, ROLE.SAFETY_MANAGER, ROLE.SITE_ADMIN]}>
+          <RequireRole
+            roles={[ROLE.AUDITOR, ROLE.SAFETY_MANAGER, ROLE.SITE_ADMIN]}
+          >
             <AuditPage />
           </RequireRole>
         }

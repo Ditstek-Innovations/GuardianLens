@@ -207,6 +207,8 @@ def get_event(
         rule_snapshot=row.rule_snapshot,
         source=row.source,
         confidence=float(row.confidence) if row.confidence is not None else None,
+        predicted_class=row.predicted_class,
+        predicted_bbox=(list(row.predicted_bbox) if row.predicted_bbox is not None else None),
         occurred_at=row.occurred_at,
         received_at=row.received_at,
         status=row.status,

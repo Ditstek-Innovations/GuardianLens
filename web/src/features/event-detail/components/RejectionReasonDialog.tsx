@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react';
+import { useRef, useState } from "react";
 
-import { Button, FormField, Modal, Textarea } from '@/components/ui';
+import { Button, FormField, Modal, Textarea } from "@/components/ui";
 
-import type { ChangeEvent, FormEvent } from 'react';
+import type { ChangeEvent, FormEvent } from "react";
 
 export interface RejectionReasonDialogProps {
   readonly draft: string;
@@ -30,14 +30,14 @@ export const RejectionReasonDialog = ({
   const handleChange = (event: ChangeEvent<HTMLTextAreaElement>): void => {
     onDraftChange(event.target.value);
     // CS-FM-02 — re-validate on change only after the first failed submit.
-    if (error !== null && event.target.value.trim() !== '') setError(null);
+    if (error !== null && event.target.value.trim() !== "") setError(null);
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const reason = draft.trim();
-    if (reason === '') {
-      setError('A rejection reason is required.');
+    if (reason === "") {
+      setError("A rejection reason is required.");
       textareaRef.current?.focus(); // CS-FM-04 — focus the invalid field
       return;
     }
@@ -48,8 +48,18 @@ export const RejectionReasonDialog = ({
     <Modal title="Reject candidate" onClose={onCancel}>
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <FormField label="Rejection reason" required error={error ?? undefined}>
-          <Textarea ref={textareaRef} rows={3} value={draft} onChange={handleChange} />
+          <Textarea
+            ref={textareaRef}
+            rows={3}
+            value={draft}
+            onChange={handleChange}
+          />
         </FormField>
+        <p className="rounded-control bg-surface-2 px-3 py-2 text-xs text-fg-muted">
+          This rejection is added automatically as a false-positive training
+          example. If the image contains another monitored class, choose Correct
+          instead.
+        </p>
         <div className="flex justify-end gap-3">
           <Button variant="ghost" onClick={onCancel} disabled={isSubmitting}>
             Cancel

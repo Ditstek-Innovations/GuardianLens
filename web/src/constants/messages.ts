@@ -31,6 +31,15 @@ export const MESSAGES = {
       `${result.accepted} records accepted; ${result.failed} could not be accepted. The queue has refreshed.`,
     allAcceptFailed:
       "The records could not be accepted. Check the connection and try again — the queue has refreshed.",
+    allRejected: (count: number): string =>
+      `${count} records rejected — each remains available in the rejection log.`,
+    allRejectedPartial: (result: {
+      rejected: number;
+      failed: number;
+    }): string =>
+      `${result.rejected} records rejected; ${result.failed} could not be rejected. The queue has refreshed.`,
+    allRejectFailed:
+      "The records could not be rejected. Check the connection and try again — the queue has refreshed.",
   },
   config: {
     ruleActivated: (ruleName: string): string =>

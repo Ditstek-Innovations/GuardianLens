@@ -36,4 +36,26 @@ describe('EvidenceFrame', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent(/evidence unavailable — storage failure/i);
   });
+
+  it('shows confidence and a magnified inset for the detected item', () => {
+    render(
+      <EvidenceFrame
+        url="blob:mock"
+        isPending={false}
+        isError={false}
+        alt="Bottle evidence"
+        onLoaded={() => undefined}
+        onFailed={() => undefined}
+        prediction={{
+          className: 'bottle',
+          confidence: 0.823,
+          bbox: [0.2, 0.25, 0.45, 0.8],
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText('bottle prediction')).toHaveTextContent('bottle · 82%');
+    expect(screen.getByRole('img', { name: 'Magnified bottle detection' })).toBeInTheDocument();
+    expect(screen.getByText('Zoom · bottle')).toBeInTheDocument();
+  });
 });

@@ -333,6 +333,13 @@ class ConfigRepository:
             is not None
         )
 
+    def rule_detection_class(self, rule_id: UUID) -> str | None:
+        return self._session.execute(
+            sa.select(detection_rules.c.detection_class).where(
+                detection_rules.c.id == rule_id
+            )
+        ).scalar_one_or_none()
+
     def model_version_id(self, version: str) -> UUID | None:
         return self._session.execute(
             sa.select(model_versions.c.id).where(model_versions.c.version == version)

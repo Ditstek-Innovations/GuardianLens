@@ -11,12 +11,14 @@ import { useToast } from '@/hooks/useToast';
 import { useSitesQuery } from '../api/useConfigQueries';
 import { useCamerasQuery } from '../api/useConfigQueries';
 import { useCreateCamera } from '../api/useCreateCamera';
+import { useDeleteCamera } from '../api/useDeleteCamera';
 import { useUpdateCamera } from '../api/useUpdateCamera';
 import { ConfigSection } from './ConfigSection';
 import { ROUTES } from '@/constants/routes';
 
 import type { FormEvent } from 'react';
 import type { CameraSummary } from '@/lib/api/types';
+import { ApiError } from '@/lib/api/errors';
 
 interface CameraStatusPresentation {
   readonly label: string;
@@ -175,6 +177,39 @@ const CameraStatusDialog = ({
   );
 };
 
+const DeleteCameraDialog = ({
+  camera,
+  isSubmitting,
+  onConfirm,
+  onCancel,
+}: {
+  readonly camera: CameraSummary;
+  readonly isSubmitting: boolean;
+  readonly onConfirm: () => void;
+  readonly onCancel: () => void;
+}) => (
+  <Modal title="Delete camera" onClose={onCancel}>
+    <div className="space-y-4">
+      <p className="text-sm text-fg">
+        Permanently delete “{camera.name}”? This is only allowed before the camera has zones or
+        monitoring records.
+      </p>
+      <p className="text-xs text-fg-muted">
+        If this camera has already been used, disable it instead so its history remains intact.
+        Deletion is recorded under your name.
+      </p>
+      <div className="flex justify-end gap-3">
+        <Button variant="ghost" onClick={onCancel} disabled={isSubmitting}>
+          Cancel
+        </Button>
+        <Button variant="danger" onClick={onConfirm} isLoading={isSubmitting}>
+          Delete camera
+        </Button>
+      </div>
+    </div>
+  </Modal>
+);
+
 /**
  * CS-AD-03 — adding a camera is an explicit, confirmed submit that names in
  * plain words what will change and where. The stream URL is deliberately
@@ -198,8 +233,8 @@ const RegisterCameraDialog = ({
         save and never shown again.
       </p>
       <p className="text-xs text-fg-muted">
-        Nothing on this camera is monitored until a detection rule is explicitly activated
-        (BR-001). The registration is audited.
+        Nothing on this camera is monitored until a detection rule is explicitly activated (BR-001).
+        The registration is audited.
       </p>
       <div className="flex justify-end gap-3">
         <Button variant="ghost" onClick={onCancel} disabled={isSubmitting}>
@@ -217,6 +252,7 @@ export const CamerasSection = () => {
   const camerasQuery = useCamerasQuery();
   const sitesQuery = useSitesQuery(true);
   const createCamera = useCreateCamera();
+  const deleteCamera = useDeleteCamera();
   const updateCamera = useUpdateCamera();
   const [name, setName] = useState('');
   const [siteId, setSiteId] = useState('');
@@ -228,6 +264,7 @@ export const CamerasSection = () => {
   const [pending, setPending] = useState<PendingCamera | null>(null);
   const [replaceTarget, setReplaceTarget] = useState<CameraSummary | null>(null);
   const [statusTarget, setStatusTarget] = useState<CameraSummary | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CameraSummary | null>(null);
   const { showToast } = useToast();
   const navigate = useNavigate();
 
@@ -332,6 +369,26 @@ export const CamerasSection = () => {
     );
   };
 
+  const handleDelete = (): void => {
+    if (deleteTarget === null) return;
+    const cameraName = deleteTarget.name;
+    deleteCamera.mutate(deleteTarget.id, {
+      onSuccess: () => {
+        setDeleteTarget(null);
+        showToast({ tone: 'success', message: MESSAGES.config.cameraDeleted(cameraName) });
+      },
+      onError: (error) => {
+        showToast({
+          tone: 'failure',
+          message:
+            error instanceof ApiError && error.status === 409
+              ? MESSAGES.config.cameraDeleteBlocked
+              : MESSAGES.config.cameraDeleteFailed,
+        });
+      },
+    });
+  };
+
   const form = (
     <form
       onSubmit={handleSubmit}
@@ -430,93 +487,124 @@ export const CamerasSection = () => {
         {(cameras) => {
           const counts = streamCounts(cameras);
           return (
-          <>
-          <div
-            className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3"
-            aria-live="polite"
-          >
-            <Chip variant="neutral">{counts.registered} registered</Chip>
-            <Chip variant="ok" icon={<ChipIcon glyph="check" />}>
-              {counts.online} online
-            </Chip>
-            <Chip variant="danger" icon={<ChipIcon glyph="cross" />}>
-              {counts.streamDown} stream down
-            </Chip>
-            {counts.degraded > 0 ? (
-              <Chip variant="warn" icon={<ChipIcon glyph="alert" />}>
-                {counts.degraded} degraded
-              </Chip>
-            ) : null}
-            {counts.disabled > 0 ? (
-              <Chip variant="neutral" icon={<ChipIcon glyph="circle" />}>
-                {counts.disabled} disabled
-              </Chip>
-            ) : null}
-          </div>
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-fg-muted">
-                <th scope="col" className="h-10 px-4">Name</th>
-                <th scope="col" className="h-10 px-4">Location</th>
-                <th scope="col" className="h-10 px-4">Profile</th>
-                <th scope="col" className="h-10 px-4">Sample rate</th>
-                <th scope="col" className="h-10 px-4">Stream</th>
-                <th scope="col" className="h-10 px-4">Credential</th>
-                <th scope="col" className="h-10 px-4">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {cameras.map((camera) => {
-                const presentation = statusPresentation(camera.status);
-                return (
-                  <tr key={camera.id} className="h-10 transition-colors duration-120 hover:bg-surface-2">
-                    <td className="px-4 py-2 text-fg">{camera.name}</td>
-                    <td className="px-4 py-2 text-fg-muted">{camera.location_description ?? '—'}</td>
-                    <td className="px-4 py-2 text-fg-muted">
-                      {camera.stream_profile === 'primary' ? 'Primary (HD)' : 'Secondary (SD)'}
-                    </td>
-                    <td className="px-4 py-2 tabular-nums text-fg-muted">{camera.sample_rate_fps} fps</td>
-                    <td className="px-4 py-2">
-                      <div className="flex flex-col gap-0.5">
-                        <Chip variant={presentation.variant} icon={<ChipIcon glyph={presentation.glyph} />}>
-                          {presentation.label}
-                        </Chip>
-                        {statusDetail(camera.status) !== null ? (
-                          <span className="text-xs text-fg-muted">{statusDetail(camera.status)}</span>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2">
-                      <Chip variant="neutral" icon={<ChipIcon glyph="lock" />}>
-                        Credential stored
-                      </Chip>
-                    </td>
-                    <td className="px-4 py-2">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setReplaceTarget(camera)}
-                        >
-                          Replace credential
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setStatusTarget(camera)}
-                        >
-                          {camera.status === 'disabled' ? 'Enable' : 'Disable'}
-                        </Button>
-                      </div>
-                    </td>
+            <>
+              <div
+                className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3"
+                aria-live="polite"
+              >
+                <Chip variant="neutral">{counts.registered} registered</Chip>
+                <Chip variant="ok" icon={<ChipIcon glyph="check" />}>
+                  {counts.online} online
+                </Chip>
+                <Chip variant="danger" icon={<ChipIcon glyph="cross" />}>
+                  {counts.streamDown} stream down
+                </Chip>
+                {counts.degraded > 0 ? (
+                  <Chip variant="warn" icon={<ChipIcon glyph="alert" />}>
+                    {counts.degraded} degraded
+                  </Chip>
+                ) : null}
+                {counts.disabled > 0 ? (
+                  <Chip variant="neutral" icon={<ChipIcon glyph="circle" />}>
+                    {counts.disabled} disabled
+                  </Chip>
+                ) : null}
+              </div>
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-fg-muted">
+                    <th scope="col" className="h-10 px-4">
+                      Name
+                    </th>
+                    <th scope="col" className="h-10 px-4">
+                      Location
+                    </th>
+                    <th scope="col" className="h-10 px-4">
+                      Profile
+                    </th>
+                    <th scope="col" className="h-10 px-4">
+                      Sample rate
+                    </th>
+                    <th scope="col" className="h-10 px-4">
+                      Stream
+                    </th>
+                    <th scope="col" className="h-10 px-4">
+                      Credential
+                    </th>
+                    <th scope="col" className="h-10 px-4">
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          </>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {cameras.map((camera) => {
+                    const presentation = statusPresentation(camera.status);
+                    return (
+                      <tr
+                        key={camera.id}
+                        className="h-10 transition-colors duration-120 hover:bg-surface-2"
+                      >
+                        <td className="px-4 py-2 text-fg">{camera.name}</td>
+                        <td className="px-4 py-2 text-fg-muted">
+                          {camera.location_description ?? '—'}
+                        </td>
+                        <td className="px-4 py-2 text-fg-muted">
+                          {camera.stream_profile === 'primary' ? 'Primary (HD)' : 'Secondary (SD)'}
+                        </td>
+                        <td className="px-4 py-2 tabular-nums text-fg-muted">
+                          {camera.sample_rate_fps} fps
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex flex-col gap-0.5">
+                            <Chip
+                              variant={presentation.variant}
+                              icon={<ChipIcon glyph={presentation.glyph} />}
+                            >
+                              {presentation.label}
+                            </Chip>
+                            {statusDetail(camera.status) !== null ? (
+                              <span className="text-xs text-fg-muted">
+                                {statusDetail(camera.status)}
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2">
+                          <Chip variant="neutral" icon={<ChipIcon glyph="lock" />}>
+                            Credential stored
+                          </Chip>
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setReplaceTarget(camera)}
+                            >
+                              Replace credential
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setStatusTarget(camera)}
+                            >
+                              {camera.status === 'disabled' ? 'Enable' : 'Disable'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => setDeleteTarget(camera)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </>
           );
         }}
       </ConfigSection>
@@ -542,6 +630,14 @@ export const CamerasSection = () => {
           isSubmitting={updateCamera.isPending}
           onConfirm={handleStatusChange}
           onCancel={() => setStatusTarget(null)}
+        />
+      ) : null}
+      {deleteTarget !== null ? (
+        <DeleteCameraDialog
+          camera={deleteTarget}
+          isSubmitting={deleteCamera.isPending}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
         />
       ) : null}
     </>

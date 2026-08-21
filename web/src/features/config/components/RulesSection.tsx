@@ -1,18 +1,33 @@
-import { useState } from 'react';
+import { useState } from "react";
 
-import { Button, Checkbox, Chip, ChipIcon, Combobox, FormField, Input, Select } from '@/components/ui';
-import { MESSAGES } from '@/constants/messages';
-import { useAuth } from '@/hooks/useAuth';
-import { useToast } from '@/hooks/useToast';
+import {
+  Button,
+  Checkbox,
+  Chip,
+  ChipIcon,
+  Combobox,
+  FormField,
+  Input,
+  Select,
+} from "@/components/ui";
+import { MESSAGES } from "@/constants/messages";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/useToast";
 
-import { useRulesQuery, useZonesQuery, useModelClassesQuery } from '../api/useConfigQueries';
-import { useCreateRule } from '../api/useCreateRule';
-import { useSetRuleActive } from '../api/useSetRuleActive';
-import { ConfigSection } from './ConfigSection';
-import { RuleActivationDialog } from './RuleActivationDialog';
+import {
+  useRulesQuery,
+  useZonesQuery,
+  useModelClassesQuery,
+} from "../api/useConfigQueries";
+import { useCreateRule } from "../api/useCreateRule";
+import { useDeleteConfigRecord } from "../api/useDeleteConfigRecord";
+import { useSetRuleActive } from "../api/useSetRuleActive";
+import { ConfigSection } from "./ConfigSection";
+import { DeleteConfigDialog } from "./DeleteConfigDialog";
+import { RuleActivationDialog } from "./RuleActivationDialog";
 
-import type { FormEvent } from 'react';
-import type { RuleSummary } from '@/lib/api/types';
+import type { FormEvent } from "react";
+import type { RuleSummary } from "@/lib/api/types";
 
 /**
  * The rule vocabulary the product currently demos and tests end to end.
@@ -21,31 +36,31 @@ import type { RuleSummary } from '@/lib/api/types';
  */
 const RULE_TYPE_OPTIONS = [
   {
-    value: 'ppe_helmet',
-    label: 'PPE — helmet required',
-    defaultDetectionClass: 'person_without_helmet',
-    defaultRuleText: 'Helmet required',
+    value: "ppe_helmet",
+    label: "PPE — helmet required",
+    defaultDetectionClass: "person_without_helmet",
+    defaultRuleText: "Helmet required",
     defaultMustBeCarried: false,
   },
   {
-    value: 'found_bottle',
-    label: 'Found Bottle',
-    defaultDetectionClass: 'bottle',
-    defaultRuleText: 'Found Bottle',
+    value: "found_bottle",
+    label: "Found Bottle",
+    defaultDetectionClass: "bottle",
+    defaultRuleText: "Found Bottle",
     defaultMustBeCarried: false,
   },
   {
-    value: 'mobile_phone',
-    label: 'Mobile phone use',
-    defaultDetectionClass: 'cell phone',
-    defaultRuleText: 'Mobile phone use',
+    value: "mobile_phone",
+    label: "Mobile phone use",
+    defaultDetectionClass: "cell phone",
+    defaultRuleText: "Mobile phone use",
     defaultMustBeCarried: true,
   },
   {
-    value: 'zone_entry',
-    label: 'Zone entry / intrusion detection',
-    defaultDetectionClass: 'person',
-    defaultRuleText: 'Intrusion detected',
+    value: "zone_entry",
+    label: "Zone entry / intrusion detection",
+    defaultDetectionClass: "person",
+    defaultRuleText: "Intrusion detected",
     defaultMustBeCarried: false,
   },
 ] as const;
@@ -57,21 +72,29 @@ export const RulesSection = () => {
   const modelClassesQuery = useModelClassesQuery();
   const createRule = useCreateRule();
   const setRuleActive = useSetRuleActive();
+  const deleteRule = useDeleteConfigRecord("rules");
   const { showToast } = useToast();
   const [pendingRule, setPendingRule] = useState<RuleSummary | null>(null);
-  const [ruleName, setRuleName] = useState<string>(RULE_TYPE_OPTIONS[0].defaultRuleText);
-  const [zoneId, setZoneId] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<RuleSummary | null>(null);
+  const [ruleName, setRuleName] = useState<string>(
+    RULE_TYPE_OPTIONS[0].defaultRuleText,
+  );
+  const [zoneId, setZoneId] = useState("");
   const [ruleType, setRuleType] = useState<string>(RULE_TYPE_OPTIONS[0].value);
-  const [threshold, setThreshold] = useState('0.5');
-  const [debounce, setDebounce] = useState('30');
-  const [dwell, setDwell] = useState('');
-  const [writtenRef, setWrittenRef] = useState('');
-  const [detectionClass, setDetectionClass] = useState<string>(RULE_TYPE_OPTIONS[0].defaultDetectionClass);
-  const [mustBeCarried, setMustBeCarried] = useState<boolean>(RULE_TYPE_OPTIONS[0].defaultMustBeCarried);
+  const [threshold, setThreshold] = useState("0.5");
+  const [debounce, setDebounce] = useState("30");
+  const [dwell, setDwell] = useState("");
+  const [writtenRef, setWrittenRef] = useState("");
+  const [detectionClass, setDetectionClass] = useState<string>(
+    RULE_TYPE_OPTIONS[0].defaultDetectionClass,
+  );
+  const [mustBeCarried, setMustBeCarried] = useState<boolean>(
+    RULE_TYPE_OPTIONS[0].defaultMustBeCarried,
+  );
   const [formError, setFormError] = useState<string | null>(null);
 
   const zones = zonesQuery.data ?? [];
-  const effectiveZoneId = zoneId !== '' ? zoneId : (zones[0]?.id ?? '');
+  const effectiveZoneId = zoneId !== "" ? zoneId : (zones[0]?.id ?? "");
   const modelClasses = modelClassesQuery.data ?? [];
 
   const handleRuleTypeChange = (newType: string) => {
@@ -80,9 +103,9 @@ export const RulesSection = () => {
     if (config) {
       setDetectionClass(config.defaultDetectionClass);
       setMustBeCarried(config.defaultMustBeCarried);
-      
+
       const isCurrentTextDefault = RULE_TYPE_OPTIONS.some(
-        (opt) => opt.defaultRuleText === ruleName || ruleName === '',
+        (opt) => opt.defaultRuleText === ruleName || ruleName === "",
       );
       if (isCurrentTextDefault) {
         setRuleName(config.defaultRuleText);
@@ -95,27 +118,38 @@ export const RulesSection = () => {
     const trimmedName = ruleName.trim();
     const parsedThreshold = Number(threshold);
     const parsedDebounce = Number(debounce);
-    if (trimmedName === '' || effectiveZoneId === '') {
-      setFormError('Rule text and zone are required.');
+    if (trimmedName === "" || effectiveZoneId === "") {
+      setFormError("Rule text and zone are required.");
       return;
     }
-    if (Number.isNaN(parsedThreshold) || parsedThreshold < 0 || parsedThreshold > 1) {
-      setFormError('Confidence threshold must be between 0 and 1.');
+    if (
+      Number.isNaN(parsedThreshold) ||
+      parsedThreshold < 0 ||
+      parsedThreshold > 1
+    ) {
+      setFormError("Confidence threshold must be between 0 and 1.");
       return;
     }
     if (!Number.isInteger(parsedDebounce) || parsedDebounce < 0) {
-      setFormError('Debounce must be a whole number of seconds, 0 or more.');
+      setFormError("Debounce must be a whole number of seconds, 0 or more.");
       return;
     }
     const trimmedDwell = dwell.trim();
-    const parsedDwell = trimmedDwell === '' ? null : Number(trimmedDwell);
-    if (parsedDwell !== null && (!Number.isInteger(parsedDwell) || parsedDwell < 0)) {
-      setFormError('Dwell must be empty, or a whole number of seconds, 0 or more.');
+    const parsedDwell = trimmedDwell === "" ? null : Number(trimmedDwell);
+    if (
+      parsedDwell !== null &&
+      (!Number.isInteger(parsedDwell) || parsedDwell < 0)
+    ) {
+      setFormError(
+        "Dwell must be empty, or a whole number of seconds, 0 or more.",
+      );
       return;
     }
     const trimmedDetectionClass = detectionClass.trim();
-    if (trimmedDetectionClass === '') {
-      setFormError('Detection class is required — the model-output class this rule watches for.');
+    if (trimmedDetectionClass === "") {
+      setFormError(
+        "Detection class is required — the model-output class this rule watches for.",
+      );
       return;
     }
     setFormError(null);
@@ -129,20 +163,26 @@ export const RulesSection = () => {
         debounceSeconds: parsedDebounce,
         dwellSeconds: parsedDwell,
         humanReadable: trimmedName,
-        writtenRuleReference: writtenRef.trim() === '' ? null : writtenRef.trim(),
+        writtenRuleReference:
+          writtenRef.trim() === "" ? null : writtenRef.trim(),
         detectionClass: trimmedDetectionClass,
         mustBeCarried,
       },
       {
         onSuccess: () => {
-          const currentConfig = RULE_TYPE_OPTIONS.find((opt) => opt.value === ruleType);
-          setRuleName(currentConfig?.defaultRuleText ?? '');
-          setWrittenRef('');
-          setDwell('');
-          showToast({ tone: 'success', message: MESSAGES.config.ruleCreated });
+          const currentConfig = RULE_TYPE_OPTIONS.find(
+            (opt) => opt.value === ruleType,
+          );
+          setRuleName(currentConfig?.defaultRuleText ?? "");
+          setWrittenRef("");
+          setDwell("");
+          showToast({ tone: "success", message: MESSAGES.config.ruleCreated });
         },
         onError: () => {
-          showToast({ tone: 'failure', message: MESSAGES.config.ruleCreateFailed });
+          showToast({
+            tone: "failure",
+            message: MESSAGES.config.ruleCreateFailed,
+          });
         },
       },
     );
@@ -160,7 +200,7 @@ export const RulesSection = () => {
           // CS-MSG-01/02 — outcome + consequence from the catalogue;
           // activation is attributable (BR-C-02).
           showToast({
-            tone: 'success',
+            tone: "success",
             message: willBeActive
               ? MESSAGES.config.ruleActivated(ruleName)
               : MESSAGES.config.ruleDeactivated(ruleName),
@@ -170,7 +210,10 @@ export const RulesSection = () => {
           // The dialog stays open for retry; the toast names the next step
           // (CS-MSG-05). The list is server-truth: nothing shown optimistically
           // (CS-AD-04).
-          showToast({ tone: 'failure', message: MESSAGES.config.ruleChangeFailed });
+          showToast({
+            tone: "failure",
+            message: MESSAGES.config.ruleChangeFailed,
+          });
         },
       },
     );
@@ -178,6 +221,26 @@ export const RulesSection = () => {
 
   const handleCancel = (): void => {
     setPendingRule(null);
+  };
+
+  const handleDelete = (): void => {
+    if (deleteTarget === null) return;
+    const name = deleteTarget.human_readable;
+    deleteRule.mutate(deleteTarget.id, {
+      onSuccess: () => {
+        setDeleteTarget(null);
+        showToast({
+          tone: "success",
+          message: MESSAGES.config.ruleDeleted(name),
+        });
+      },
+      onError: () => {
+        showToast({
+          tone: "failure",
+          message: MESSAGES.config.ruleDeleteFailed,
+        });
+      },
+    });
   };
 
   const form = (
@@ -194,10 +257,16 @@ export const RulesSection = () => {
         error={formError ?? undefined}
         className="lg:col-span-4"
       >
-        <Input value={ruleName} onChange={(event) => setRuleName(event.target.value)} />
+        <Input
+          value={ruleName}
+          onChange={(event) => setRuleName(event.target.value)}
+        />
       </FormField>
       <FormField label="Zone" required className="lg:col-span-3">
-        <Select value={effectiveZoneId} onChange={(event) => setZoneId(event.target.value)}>
+        <Select
+          value={effectiveZoneId}
+          onChange={(event) => setZoneId(event.target.value)}
+        >
           {zones.map((zone) => (
             <option key={zone.id} value={zone.id}>
               {zone.name}
@@ -206,7 +275,10 @@ export const RulesSection = () => {
         </Select>
       </FormField>
       <FormField label="Type" required className="lg:col-span-3">
-        <Select value={ruleType} onChange={(event) => handleRuleTypeChange(event.target.value)}>
+        <Select
+          value={ruleType}
+          onChange={(event) => handleRuleTypeChange(event.target.value)}
+        >
           {RULE_TYPE_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -220,7 +292,7 @@ export const RulesSection = () => {
         hint={
           modelClasses.length > 0
             ? `Choose from the ${modelClasses.length} classes your model emits, or type a custom value.`
-            : 'The model-output class this rule watches for. Must match a class the approved model emits.'
+            : "The model-output class this rule watches for. Must match a class the approved model emits."
         }
         className="lg:col-span-4"
       >
@@ -228,7 +300,7 @@ export const RulesSection = () => {
           value={detectionClass}
           onChange={setDetectionClass}
           options={modelClasses}
-          placeholder={modelClasses[0] ?? 'e.g. bottle, cell phone, person…'}
+          placeholder={modelClasses[0] ?? "e.g. bottle, cell phone, person…"}
         />
       </FormField>
       <FormField
@@ -294,7 +366,10 @@ export const RulesSection = () => {
         hint="The site safety rule this enforces (BR-011 — advisory, but expected)."
         className="lg:col-span-5"
       >
-        <Input value={writtenRef} onChange={(event) => setWrittenRef(event.target.value)} />
+        <Input
+          value={writtenRef}
+          onChange={(event) => setWrittenRef(event.target.value)}
+        />
       </FormField>
       <div className="flex items-end justify-end lg:col-span-3">
         <Button type="submit" isLoading={createRule.isPending}>
@@ -318,13 +393,27 @@ export const RulesSection = () => {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-fg-muted">
-                <th scope="col" className="h-10 px-4">Rule</th>
-                <th scope="col" className="h-10 px-4">Type</th>
-                <th scope="col" className="h-10 px-4">Detection class</th>
-                <th scope="col" className="h-10 px-4">Timing</th>
-                <th scope="col" className="h-10 px-4">State</th>
-                <th scope="col" className="h-10 px-4">Activated by</th>
-                <th scope="col" className="h-10 px-4">Written rule reference</th>
+                <th scope="col" className="h-10 px-4">
+                  Rule
+                </th>
+                <th scope="col" className="h-10 px-4">
+                  Type
+                </th>
+                <th scope="col" className="h-10 px-4">
+                  Detection class
+                </th>
+                <th scope="col" className="h-10 px-4">
+                  Timing
+                </th>
+                <th scope="col" className="h-10 px-4">
+                  State
+                </th>
+                <th scope="col" className="h-10 px-4">
+                  Activated by
+                </th>
+                <th scope="col" className="h-10 px-4">
+                  Written rule reference
+                </th>
                 <th scope="col" className="h-10 px-4">
                   <span className="sr-only">Actions</span>
                 </th>
@@ -332,16 +421,21 @@ export const RulesSection = () => {
             </thead>
             <tbody className="divide-y divide-border">
               {rules.map((rule) => (
-                <tr key={rule.id} className="h-10 transition-colors duration-120 hover:bg-surface-2">
+                <tr
+                  key={rule.id}
+                  className="h-10 transition-colors duration-120 hover:bg-surface-2"
+                >
                   <td className="px-4 py-2 text-fg">{rule.human_readable}</td>
                   <td className="px-4 py-2 text-fg-muted">{rule.rule_type}</td>
                   <td className="px-4 py-2 font-mono text-xs text-fg-muted">
                     {rule.detection_class}
-                    {rule.must_be_carried ? ' · on-person' : ''}
+                    {rule.must_be_carried ? " · on-person" : ""}
                   </td>
                   <td className="px-4 py-2 text-fg-muted">
                     {rule.debounce_seconds}s debounce
-                    {rule.dwell_seconds != null ? `, ${rule.dwell_seconds}s dwell` : ''}
+                    {rule.dwell_seconds != null
+                      ? `, ${rule.dwell_seconds}s dwell`
+                      : ""}
                   </td>
                   <td className="px-4 py-2">
                     {rule.is_active ? (
@@ -349,13 +443,16 @@ export const RulesSection = () => {
                         Active
                       </Chip>
                     ) : (
-                      <Chip variant="neutral" icon={<ChipIcon glyph="circle" />}>
+                      <Chip
+                        variant="neutral"
+                        icon={<ChipIcon glyph="circle" />}
+                      >
                         Inactive
                       </Chip>
                     )}
                   </td>
                   <td className="px-4 py-2 text-fg-muted">
-                    {rule.activated_by?.full_name ?? '—'}
+                    {rule.activated_by?.full_name ?? "—"}
                   </td>
                   <td className="px-4 py-2">
                     {rule.written_rule_reference ?? (
@@ -366,9 +463,22 @@ export const RulesSection = () => {
                     )}
                   </td>
                   <td className="px-4 py-2">
-                    <Button size="sm" variant="secondary" onClick={() => setPendingRule(rule)}>
-                      {rule.is_active ? 'Deactivate' : 'Activate'}
-                    </Button>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setPendingRule(rule)}
+                      >
+                        {rule.is_active ? "Deactivate" : "Activate"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => setDeleteTarget(rule)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -381,6 +491,16 @@ export const RulesSection = () => {
               isSubmitting={setRuleActive.isPending}
               onConfirm={handleConfirm}
               onCancel={handleCancel}
+            />
+          ) : null}
+          {deleteTarget !== null ? (
+            <DeleteConfigDialog
+              title="Delete detection rule"
+              name={deleteTarget.human_readable}
+              detail="The rule is removed from the next edge configuration. Existing event snapshots remain in history."
+              isSubmitting={deleteRule.isPending}
+              onConfirm={handleDelete}
+              onCancel={() => setDeleteTarget(null)}
             />
           ) : null}
         </>

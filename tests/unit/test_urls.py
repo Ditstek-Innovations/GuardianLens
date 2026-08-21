@@ -20,7 +20,10 @@ from guardian_lens.db.urls import (
     tenant_url,
     with_database,
 )
-from guardian_lens.services.camera_discovery import anonymous_rtsp_url
+from guardian_lens.services.camera_discovery import (
+    anonymous_rtsp_url,
+    resolve_ffprobe,
+)
 
 BASE = "postgresql+psycopg://u:p@host:5432/gl_tenant_pilot"
 
@@ -129,3 +132,22 @@ def test_camera_rtsp_url_embeds_login_when_provided():
     assert parts.path == "/stream2"
     assert parts.username == "cam"
     assert parts.password == "secret"
+
+
+def test_resolve_ffprobe_prefers_configured_executable(tmp_path, monkeypatch):
+    ffprobe = tmp_path / "ffprobe"
+    ffprobe.write_text("#!/bin/sh\n")
+    ffprobe.chmod(0o700)
+    monkeypatch.setenv("GL_FFPROBE_PATH", str(ffprobe))
+
+    assert resolve_ffprobe() == str(ffprobe)
+
+
+def test_resolve_ffprobe_supports_existing_bin_setting(tmp_path, monkeypatch):
+    ffprobe = tmp_path / "ffprobe"
+    ffprobe.write_text("#!/bin/sh\n")
+    ffprobe.chmod(0o700)
+    monkeypatch.delenv("GL_FFPROBE_PATH", raising=False)
+    monkeypatch.setenv("GL_FFPROBE_BIN", str(ffprobe))
+
+    assert resolve_ffprobe() == str(ffprobe)

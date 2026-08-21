@@ -19,9 +19,11 @@ from sqlalchemy.orm import Session
 
 from guardian_lens.repositories.tables import (
     agents,
+    audit_log,
     cameras,
     coverage_gaps,
     detection_rules,
+    events,
     model_versions,
     sites,
     zones,
@@ -145,6 +147,24 @@ class ConfigRepository:
             return None
         return self.get_camera(camera_id)
 
+    def camera_has_references(self, camera_id: UUID) -> bool:
+        zone_ref, event_ref, gap_ref = self._session.execute(
+            sa.select(
+                sa.exists(sa.select(1).where(zones.c.camera_id == camera_id)),
+                sa.exists(sa.select(1).where(events.c.camera_id == camera_id)),
+                sa.exists(
+                    sa.select(1).where(coverage_gaps.c.camera_id == camera_id)
+                ),
+            )
+        ).one()
+        return bool(zone_ref or event_ref or gap_ref)
+
+    def delete_camera(self, camera_id: UUID) -> bool:
+        result = self._session.execute(
+            sa.delete(cameras).where(cameras.c.id == camera_id)
+        )
+        return result.rowcount == 1
+
     def review_block_for_sites(self, site_ids: Sequence[UUID]) -> list[dict[str, Any]]:
         """Hydrate the latest edge miss snapshot for Review UI.
 
@@ -232,6 +252,17 @@ class ConfigRepository:
         )
         return result.rowcount == 1
 
+    def zone_has_references(self, zone_id: UUID) -> bool:
+        rule_ref, event_ref = self._session.execute(
+            sa.select(
+                sa.exists(
+                    sa.select(1).where(detection_rules.c.zone_id == zone_id)
+                ),
+                sa.exists(sa.select(1).where(events.c.zone_id == zone_id)),
+            )
+        ).one()
+        return bool(rule_ref or event_ref)
+
     # -- detection rules -----------------------------------------------------
 
     def insert_rule(self, values: dict[str, Any]) -> sa.Row:
@@ -273,6 +304,12 @@ class ConfigRepository:
             .returning(detection_rules)
         ).one_or_none()
 
+    def delete_rule(self, rule_id: UUID) -> bool:
+        result = self._session.execute(
+            sa.delete(detection_rules).where(detection_rules.c.id == rule_id)
+        )
+        return result.rowcount == 1
+
     # -- lookups for ingest validation --------------------------------------
 
     def camera_site(self, camera_id: UUID) -> UUID | None:
@@ -308,12 +345,37 @@ class ConfigRepository:
             sa.insert(agents).values(**values).returning(*_AGENT_PUBLIC)
         ).one()
 
+    def get_agent(self, agent_id: UUID) -> sa.Row | None:
+        return self._session.execute(
+            sa.select(*_AGENT_PUBLIC).where(agents.c.id == agent_id)
+        ).one_or_none()
+
     def list_agents(self, site_ids: Sequence[UUID]) -> Sequence[sa.Row]:
         return self._session.execute(
             sa.select(*_AGENT_PUBLIC)
             .where(agents.c.site_id.in_(list(site_ids)))
             .order_by(agents.c.name)
         ).all()
+
+    def agent_has_references(self, agent_id: UUID) -> bool:
+        event_ref, gap_ref, audit_ref = self._session.execute(
+            sa.select(
+                sa.exists(sa.select(1).where(events.c.agent_id == agent_id)),
+                sa.exists(
+                    sa.select(1).where(coverage_gaps.c.agent_id == agent_id)
+                ),
+                sa.exists(
+                    sa.select(1).where(audit_log.c.actor_agent_id == agent_id)
+                ),
+            )
+        ).one()
+        return bool(event_ref or gap_ref or audit_ref)
+
+    def delete_agent(self, agent_id: UUID) -> bool:
+        result = self._session.execute(
+            sa.delete(agents).where(agents.c.id == agent_id)
+        )
+        return result.rowcount == 1
 
     # -- model versions (gate G1 evidence trail) -----------------------------
 
@@ -341,6 +403,25 @@ class ConfigRepository:
             .values(**values)
             .returning(model_versions)
         ).one_or_none()
+
+    def model_version_has_references(self, model_version_id: UUID) -> bool:
+        return bool(
+            self._session.execute(
+                sa.select(
+                    sa.exists(
+                        sa.select(1).where(
+                            events.c.model_version_id == model_version_id
+                        )
+                    )
+                )
+            ).scalar_one()
+        )
+
+    def delete_model_version(self, model_version_id: UUID) -> bool:
+        result = self._session.execute(
+            sa.delete(model_versions).where(model_versions.c.id == model_version_id)
+        )
+        return result.rowcount == 1
 
     # -- coverage gaps -------------------------------------------------------
 

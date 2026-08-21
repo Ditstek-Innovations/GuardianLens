@@ -34,6 +34,7 @@ __all__ = [
     "NotFoundError",
     "AlreadyDecidedError",
     "VersionConflictError",
+    "ResourceInUseError",
     "PayloadTooLargeError",
     "ValidationFailureError",
     "RateLimitedError",
@@ -175,6 +176,13 @@ class DuplicateResourceError(GuardianError):
 
     http_status = 409
     code = "GL-4092"
+
+
+class ResourceInUseError(GuardianError):
+    """A configuration resource still has protected dependent records."""
+
+    http_status = 409
+    code = "GL-4093"
 
 
 class PayloadTooLargeError(GuardianError):

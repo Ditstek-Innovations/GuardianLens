@@ -1,7 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Camera, Plus, Trash2, RefreshCw } from 'lucide-react';
-import { apiClient } from '@/lib/api/client';
+import { useCallback, useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import {
+  AlertTriangle,
+  Camera,
+  LockKeyhole,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
+
+import { Button, Chip, Input, Modal, Select } from "@/components/ui";
+import { apiClient } from "@/lib/api/client";
 
 interface DiscoveryScan {
   id: string;
@@ -31,23 +40,22 @@ interface DiscoveredCamera {
   imported_at: string | null;
 }
 
-
-
 export function CameraDiscovery() {
   const { siteId } = useParams<{ siteId: string }>();
-  
-  const [subnet, setSubnet] = useState('192.168.1.0/24');
+
+  const [subnet, setSubnet] = useState("192.168.0.0/24");
   const [scanning, setScanning] = useState(false);
   const [currentScanId, setCurrentScanId] = useState<string | null>(null);
   const [scanStatus, setScanStatus] = useState<DiscoveryScan | null>(null);
   const [candidates, setCandidates] = useState<DiscoveredCamera[]>([]);
-  const [selectedCandidate, setSelectedCandidate] = useState<DiscoveredCamera | null>(null);
+  const [selectedCandidate, setSelectedCandidate] =
+    useState<DiscoveredCamera | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importName, setImportName] = useState('');
-  const [importLocation, setImportLocation] = useState('');
-  const [importRtspPath, setImportRtspPath] = useState('');
-  const [importRtspUser, setImportRtspUser] = useState('');
-  const [importRtspPassword, setImportRtspPassword] = useState('');
+  const [importName, setImportName] = useState("");
+  const [importLocation, setImportLocation] = useState("");
+  const [importRtspPath, setImportRtspPath] = useState("");
+  const [importRtspUser, setImportRtspUser] = useState("");
+  const [importRtspPassword, setImportRtspPassword] = useState("");
   const [importing, setImporting] = useState(false);
   const [importingAll, setImportingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,21 +67,23 @@ export function CameraDiscovery() {
 
     const pollInterval = setInterval(async () => {
       try {
-        const scan = await apiClient.get<DiscoveryScan>(`/api/v1/discovery/scans/${currentScanId}`);
+        const scan = await apiClient.get<DiscoveryScan>(
+          `/api/v1/discovery/scans/${currentScanId}`,
+        );
         setScanStatus(scan);
 
-        if (scan.status === 'completed' || scan.status === 'failed') {
+        if (scan.status === "completed" || scan.status === "failed") {
           setScanning(false);
-          
-          if (scan.status === 'completed') {
+
+          if (scan.status === "completed") {
             // Fetch candidates
             await fetchCandidates();
             setSuccess(`Found ${scan.cameras_found} camera(s)`);
           }
         }
       } catch (err) {
-        console.error('Error polling scan status:', err);
-        setError('Failed to check scan status');
+        console.error("Error polling scan status:", err);
+        setError("Failed to check scan status");
         setScanning(false);
       }
     }, 1000);
@@ -83,7 +93,7 @@ export function CameraDiscovery() {
 
   const startScan = useCallback(async () => {
     if (!siteId || !subnet) {
-      setError('Site and subnet are required');
+      setError("Site and subnet are required");
       return;
     }
 
@@ -92,13 +102,17 @@ export function CameraDiscovery() {
     setSuccess(null);
 
     try {
-      const scan = await apiClient.post<DiscoveryScan>('/api/v1/discovery/scan', undefined, {
-        query: { subnet, site_id: siteId }
-      });
+      const scan = await apiClient.post<DiscoveryScan>(
+        "/api/v1/discovery/scan",
+        undefined,
+        {
+          query: { subnet, site_id: siteId },
+        },
+      );
       setCurrentScanId(scan.id);
       setScanStatus(scan);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start scan');
+      setError(err instanceof Error ? err.message : "Failed to start scan");
       setScanning(false);
     }
   }, [siteId, subnet]);
@@ -107,18 +121,21 @@ export function CameraDiscovery() {
     if (!siteId) return;
 
     try {
-      const data = await apiClient.get<DiscoveredCamera[]>('/api/v1/discovery/candidates', {
-        query: { site_id: siteId }
-      });
+      const data = await apiClient.get<DiscoveredCamera[]>(
+        "/api/v1/discovery/candidates",
+        {
+          query: { site_id: siteId },
+        },
+      );
       setCandidates(data);
     } catch (err) {
-      console.error('Error fetching candidates:', err);
-      setError('Failed to load candidates');
+      console.error("Error fetching candidates:", err);
+      setError("Failed to load candidates");
     }
   }, [siteId]);
 
   const pendingCount = candidates.filter(
-    (camera) => camera.imported_at === null && camera.resolution !== 'Unknown (Auth Required)',
+    (camera) => camera.imported_at === null,
   ).length;
 
   const handleImportAll = useCallback(async () => {
@@ -129,18 +146,15 @@ export function CameraDiscovery() {
       const result = await apiClient.post<{
         imported_count: number;
         skipped_auth_required: number;
-      }>('/api/v1/discovery/candidates/adopt-pending', undefined, {
+      }>("/api/v1/discovery/candidates/adopt-pending", undefined, {
         query: { site_id: siteId },
       });
       setSuccess(
-        `Imported ${result.imported_count} camera(s)` +
-          (result.skipped_auth_required > 0
-            ? `. Skipped ${result.skipped_auth_required} that need a camera login — import those one-by-one with username and password.`
-            : '.'),
+        `Imported ${result.imported_count} camera(s). Cameras requiring authentication can be configured later under Configuration → Cameras.`,
       );
       await fetchCandidates();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to import cameras');
+      setError(err instanceof Error ? err.message : "Failed to import cameras");
     } finally {
       setImportingAll(false);
     }
@@ -148,17 +162,17 @@ export function CameraDiscovery() {
 
   const handleImportClick = (candidate: DiscoveredCamera) => {
     setSelectedCandidate(candidate);
-    setImportName(`${candidate.model || 'Camera'} - ${candidate.ip_address}`);
-    setImportLocation('');
-    setImportRtspPath(candidate.default_rtsp_path || '');
-    setImportRtspUser('');
-    setImportRtspPassword('');
+    setImportName(`${candidate.model || "Camera"} - ${candidate.ip_address}`);
+    setImportLocation("");
+    setImportRtspPath(candidate.default_rtsp_path || "");
+    setImportRtspUser("");
+    setImportRtspPassword("");
     setShowImportModal(true);
   };
 
   const handleImport = useCallback(async () => {
     if (!selectedCandidate || !importName || !importRtspPath) {
-      setError('Name and RTSP path are required');
+      setError("Name and RTSP path are required");
       return;
     }
 
@@ -172,186 +186,227 @@ export function CameraDiscovery() {
           candidate_id: selectedCandidate.id,
           name: importName,
           location_description: importLocation || null,
-          stream_profile: 'secondary',
+          stream_profile: "secondary",
           sample_rate_fps: 2.0,
           rtsp_path: importRtspPath,
-          ...(importRtspUser.trim() !== '' && importRtspPassword !== ''
-            ? { rtsp_username: importRtspUser.trim(), rtsp_password: importRtspPassword }
+          ...(importRtspUser.trim() !== "" && importRtspPassword !== ""
+            ? {
+                rtsp_username: importRtspUser.trim(),
+                rtsp_password: importRtspPassword,
+              }
             : {}),
-        }
+        },
       );
 
       setShowImportModal(false);
       setSuccess(`Camera "${importName}" imported successfully`);
-      
+
       // Refresh candidates
       await fetchCandidates();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to import camera');
+      setError(err instanceof Error ? err.message : "Failed to import camera");
     } finally {
       setImporting(false);
     }
-  }, [selectedCandidate, importName, importLocation, importRtspPath, importRtspUser, importRtspPassword, fetchCandidates]);
+  }, [
+    selectedCandidate,
+    importName,
+    importLocation,
+    importRtspPath,
+    importRtspUser,
+    importRtspPassword,
+    fetchCandidates,
+  ]);
 
-  const handleDiscard = useCallback(
-    async (candidateId: string) => {
-      if (!confirm('Are you sure you want to discard this candidate?')) return;
+  const handleDiscard = useCallback(async (candidateId: string) => {
+    if (!confirm("Are you sure you want to discard this candidate?")) return;
 
-      try {
-        await apiClient.delete(`/api/v1/discovery/candidates/${candidateId}`);
+    try {
+      await apiClient.delete(`/api/v1/discovery/candidates/${candidateId}`);
 
-        setCandidates((prev) => prev.filter((c) => c.id !== candidateId));
-        setSuccess('Candidate discarded');
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to discard candidate');
-      }
-    },
-    []
-  );
+      setCandidates((prev) => prev.filter((c) => c.id !== candidateId));
+      setSuccess("Candidate discarded");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to discard candidate",
+      );
+    }
+  }, []);
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Camera className="w-8 h-8 text-blue-600" />
-          <h1 className="text-3xl font-bold text-gray-900">Camera Discovery</h1>
+          <Camera className="h-8 w-8 text-brand-mark" />
+          <div>
+            <h1 className="text-3xl font-bold text-fg">Camera Discovery</h1>
+            <p className="mt-1 text-sm text-fg-muted">
+              Find RTSP cameras now and add their login immediately or later.
+            </p>
+          </div>
         </div>
       </div>
 
       {/* Alerts */}
       {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-red-700">
+        <div
+          role="alert"
+          className="rounded-card border border-danger bg-danger-subtle p-4 text-danger"
+        >
           {error}
         </div>
       )}
       {success && (
-        <div className="rounded-lg bg-green-50 border border-green-200 p-4 text-green-700">
+        <div
+          role="status"
+          className="rounded-card border border-ok bg-ok-subtle p-4 text-ok"
+        >
           {success}
         </div>
       )}
 
       {/* Scan Panel */}
-      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Network Scan</h2>
-        <div className="flex gap-4">
+      <section className="rounded-card border border-border bg-surface-1 p-6 shadow-ambient">
+        <h2 className="mb-4 text-lg font-semibold text-fg">Network Scan</h2>
+        <div className="flex flex-col gap-4 sm:flex-row">
           <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label
+              htmlFor="camera-discovery-subnet"
+              className="mb-2 block text-sm font-medium text-fg"
+            >
               Subnet (CIDR)
             </label>
-            <input
+            <Input
+              id="camera-discovery-subnet"
               type="text"
               value={subnet}
               onChange={(e) => setSubnet(e.target.value)}
-              placeholder="192.168.1.0/24"
+              placeholder="192.168.0.0/24"
               disabled={scanning}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
             />
           </div>
-          <div className="flex items-end">
-            <button
+          <div className="flex items-end sm:shrink-0">
+            <Button
               onClick={startScan}
               disabled={scanning}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
+              isLoading={scanning}
+              className="w-full sm:w-auto"
             >
-              <RefreshCw className="w-4 h-4" />
-              {scanning ? 'Scanning...' : 'Start Scan'}
-            </button>
+              {!scanning ? <RefreshCw className="h-4 w-4" /> : null}
+              {scanning ? "Scanning..." : "Start Scan"}
+            </Button>
           </div>
         </div>
 
         {/* Scan Progress */}
         {scanStatus && scanning && (
           <div className="mt-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-600">Scanning network...</span>
-              <span className="text-sm font-medium text-gray-700">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm text-fg-muted">Scanning network...</span>
+              <span className="text-sm font-medium text-fg">
                 {scanStatus.cameras_found} found
               </span>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{ width: '100%' }} />
+            <div className="h-2 w-full overflow-hidden rounded-full bg-surface-3">
+              <div className="h-2 w-full animate-pulse rounded-full bg-brand-500" />
             </div>
           </div>
         )}
-      </div>
+      </section>
 
       {/* Candidates List */}
-      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden shadow-sm">
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+      <section className="overflow-hidden rounded-card border border-border bg-surface-1 shadow-ambient">
+        <div className="flex flex-col items-start justify-between gap-3 border-b border-border px-6 py-4 sm:flex-row sm:items-center">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-fg">
               Discovered Cameras ({candidates.length})
             </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Import uses an open RTSP URL (no camera login): rtsp://ip:port/path. Streams that
-              answered 401 are skipped.
+            <p className="mt-1 text-sm text-fg-muted">
+              Authentication-required cameras can be imported now. Add their
+              RTSP login later from Configuration → Cameras → Replace
+              credential.
             </p>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="ok"
+            size="sm"
             onClick={() => void handleImportAll()}
             disabled={importingAll || pendingCount === 0}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors text-sm"
+            isLoading={importingAll}
+            className="shrink-0"
           >
-            <Plus className="w-4 h-4" />
-            {importingAll ? 'Importing…' : `Import all (${pendingCount})`}
-          </button>
+            {!importingAll ? <Plus className="h-4 w-4" /> : null}
+            {importingAll ? "Importing…" : `Import all (${pendingCount})`}
+          </Button>
         </div>
 
         {candidates.length === 0 ? (
-          <div className="px-6 py-8 text-center text-gray-500">
+          <div className="px-6 py-10 text-center text-fg-muted">
             No cameras discovered. Run a network scan to find cameras.
           </div>
         ) : (
-          <div className="divide-y divide-gray-200">
+          <div className="divide-y divide-border">
             {candidates.map((camera) => (
               <div
                 key={camera.id}
-                className="px-6 py-4 hover:bg-gray-50 transition-colors"
+                className="px-6 py-4 transition-colors duration-120 hover:bg-surface-2"
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="font-semibold text-gray-900">
-                        {camera.model || 'Unknown Camera'}
+                <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-2 flex items-center gap-3">
+                      <h3 className="font-semibold text-fg">
+                        {camera.model || "Unknown Camera"}
                       </h3>
-                      <span className="inline-block px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded">
-                        {camera.status}
-                      </span>
+                      {camera.imported_at !== null ? (
+                        <Chip variant="neutral">Imported</Chip>
+                      ) : camera.resolution === "Unknown (Auth Required)" ? (
+                        <Chip
+                          variant="warn"
+                          icon={<LockKeyhole className="h-3.5 w-3.5" />}
+                        >
+                          Login required
+                        </Chip>
+                      ) : (
+                        <Chip variant="ok">{camera.status}</Chip>
+                      )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4 text-sm text-gray-600 mb-3">
+                    <div className="mb-3 grid grid-cols-1 gap-2 text-sm text-fg-muted sm:grid-cols-2 sm:gap-4">
                       <div>
-                        <span className="font-medium">IP:</span> {camera.ip_address}:{camera.port}
+                        <span className="font-medium">IP:</span>{" "}
+                        {camera.ip_address}:{camera.port}
                       </div>
                       {camera.manufacturer && (
                         <div>
-                          <span className="font-medium">Manufacturer:</span> {camera.manufacturer}
+                          <span className="font-medium">Manufacturer:</span>{" "}
+                          {camera.manufacturer}
                         </div>
                       )}
                       {camera.resolution && (
                         <div>
-                          <span className="font-medium">Resolution:</span> {camera.resolution}
+                          <span className="font-medium">Resolution:</span>{" "}
+                          {camera.resolution}
                         </div>
                       )}
                       {camera.codec && (
                         <div>
-                          <span className="font-medium">Codec:</span> {camera.codec}
+                          <span className="font-medium">Codec:</span>{" "}
+                          {camera.codec}
                         </div>
                       )}
                     </div>
 
                     {camera.rtsp_paths.length > 0 && (
                       <div className="mb-3">
-                        <span className="text-sm font-medium text-gray-700">
+                        <span className="text-sm font-medium text-fg">
                           RTSP Paths:
                         </span>
-                        <div className="flex flex-wrap gap-2 mt-1">
+                        <div className="mt-1 flex flex-wrap gap-2">
                           {camera.rtsp_paths.map((path) => (
                             <span
                               key={path}
-                              className="inline-block px-2 py-1 bg-gray-100 text-gray-700 text-xs font-mono rounded"
+                              className="inline-block rounded-sm bg-surface-3 px-2 py-1 font-mono text-xs text-fg-muted"
                             >
                               {path}
                             </span>
@@ -360,144 +415,170 @@ export function CameraDiscovery() {
                       </div>
                     )}
 
-                    <p className="text-xs text-gray-500">
-                      Discovered: {new Date(camera.discovered_at).toLocaleString()}
+                    <p className="text-xs text-fg-faint">
+                      Discovered:{" "}
+                      {new Date(camera.discovered_at).toLocaleString()}
                     </p>
                   </div>
 
-                  <div className="flex gap-2 ml-4">
-                    <button
+                  <div className="flex shrink-0 gap-2 sm:ml-4">
+                    <Button
+                      variant="ok"
+                      size="sm"
                       onClick={() => handleImportClick(camera)}
-                      disabled={
-                        camera.imported_at !== null ||
-                        camera.resolution === 'Unknown (Auth Required)'
-                      }
-                      title={
-                        camera.resolution === 'Unknown (Auth Required)'
-                          ? 'This stream returned 401 — open RTSP is not available'
-                          : undefined
-                      }
-                      className="flex items-center gap-1 px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-300 transition-colors text-sm"
+                      disabled={camera.imported_at !== null}
                     >
-                      <Plus className="w-4 h-4" />
-                      Import
-                    </button>
-                    <button
+                      <Plus className="h-4 w-4" />
+                      {camera.imported_at !== null ? "Imported" : "Import"}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
                       onClick={() => handleDiscard(camera.id)}
-                      className="flex items-center gap-1 px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-sm"
+                      aria-label={`Discard camera ${camera.ip_address}`}
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      <Trash2 className="h-4 w-4" />
+                      <span className="hidden sm:inline">Discard</span>
+                    </Button>
                   </div>
                 </div>
               </div>
             ))}
           </div>
         )}
-      </div>
+      </section>
 
       {/* Import Modal */}
       {showImportModal && selectedCandidate && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">
-              Import Camera
-            </h3>
-
-            <div className="space-y-4 mb-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Camera Name *
-                </label>
-                <input
-                  type="text"
-                  value={importName}
-                  onChange={(e) => setImportName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+        <Modal title="Import Camera" onClose={() => setShowImportModal(false)}>
+          <div className="mb-6 space-y-4">
+            {selectedCandidate.resolution === "Unknown (Auth Required)" ? (
+              <div className="flex items-start gap-2 rounded-control border border-warn bg-warn-subtle p-3 text-sm text-warn">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>
+                  This camera requires authentication. You can import it without
+                  a login now; it will show as stream down until you add the
+                  RTSP URL from Configuration → Cameras → Replace credential.
+                </p>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Location Description
-                </label>
-                <input
-                  type="text"
-                  value={importLocation}
-                  onChange={(e) => setImportLocation(e.target.value)}
-                  placeholder="e.g., Main Entrance"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  RTSP Path *
-                </label>
-                <select
-                  value={importRtspPath}
-                  onChange={(e) => setImportRtspPath(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">-- Select a path --</option>
-                  {selectedCandidate.rtsp_paths.map((path) => (
-                    <option key={path} value={path}>
-                      {path}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Camera login (if the stream returns 401)
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    value={importRtspUser}
-                    onChange={(e) => setImportRtspUser(e.target.value)}
-                    placeholder="Username"
-                    autoComplete="off"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <input
-                    type="password"
-                    value={importRtspPassword}
-                    onChange={(e) => setImportRtspPassword(e.target.value)}
-                    placeholder="Password"
-                    autoComplete="new-password"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-                <strong>This camera’s stream URL</strong> (sealed on import; the edge uses this, not a shared static URL):<br />
-                  rtsp://{importRtspUser.trim() !== '' ? `${importRtspUser.trim()}:••••@` : ''}
-                  {selectedCandidate.ip_address}:{selectedCandidate.port}
-                  {importRtspPath ? `/${importRtspPath}` : '/<path>'}
-              </div>
+            ) : null}
+            <div>
+              <label
+                htmlFor="discovery-camera-name"
+                className="mb-2 block text-sm font-medium text-fg"
+              >
+                Camera Name *
+              </label>
+              <Input
+                id="discovery-camera-name"
+                type="text"
+                value={importName}
+                onChange={(e) => setImportName(e.target.value)}
+              />
             </div>
 
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowImportModal(false)}
-                disabled={importing}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:bg-gray-50"
+            <div>
+              <label
+                htmlFor="discovery-camera-location"
+                className="mb-2 block text-sm font-medium text-fg"
               >
-                Cancel
-              </button>
-              <button
-                onClick={handleImport}
-                disabled={importing || !importName || !importRtspPath}
-                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 transition-colors"
+                Location Description
+              </label>
+              <Input
+                id="discovery-camera-location"
+                type="text"
+                value={importLocation}
+                onChange={(e) => setImportLocation(e.target.value)}
+                placeholder="e.g., Main Entrance"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="discovery-rtsp-path"
+                className="mb-2 block text-sm font-medium text-fg"
               >
-                {importing ? 'Importing...' : 'Import Camera'}
-              </button>
+                RTSP Path *
+              </label>
+              <Select
+                id="discovery-rtsp-path"
+                value={importRtspPath}
+                onChange={(e) => setImportRtspPath(e.target.value)}
+              >
+                <option value="">-- Select a path --</option>
+                {selectedCandidate.rtsp_paths.map((path) => (
+                  <option key={path} value={path}>
+                    {path}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-medium text-fg">
+                Camera login (optional)
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  type="text"
+                  value={importRtspUser}
+                  onChange={(e) => setImportRtspUser(e.target.value)}
+                  placeholder="Username"
+                  autoComplete="off"
+                  aria-label="RTSP username"
+                />
+                <Input
+                  type="password"
+                  value={importRtspPassword}
+                  onChange={(e) => setImportRtspPassword(e.target.value)}
+                  placeholder="Password"
+                  autoComplete="new-password"
+                  aria-label="RTSP password"
+                />
+              </div>
+              <p className="mt-1 text-xs text-fg-muted">
+                Leave both blank to add the complete RTSP credential later.
+              </p>
+            </div>
+
+            <div className="rounded-control border border-border bg-brand-subtle p-3 text-sm text-brand-ink">
+              <strong>This camera’s stream URL</strong> (sealed on import; the
+              edge uses this, not a shared static URL):
+              <br />
+              rtsp://
+              {importRtspUser.trim() !== ""
+                ? `${importRtspUser.trim()}:••••@`
+                : ""}
+              {selectedCandidate.ip_address}:{selectedCandidate.port}
+              {importRtspPath ? `/${importRtspPath}` : "/<path>"}
             </div>
           </div>
-        </div>
+
+          <div className="flex gap-3">
+            <Button
+              variant="secondary"
+              onClick={() => setShowImportModal(false)}
+              disabled={importing}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="ok"
+              onClick={handleImport}
+              disabled={importing || !importName || !importRtspPath}
+              isLoading={importing}
+              className="flex-1"
+            >
+              {importing
+                ? "Importing..."
+                : selectedCandidate.resolution === "Unknown (Auth Required)" &&
+                    importRtspUser.trim() === ""
+                  ? "Import now"
+                  : "Import Camera"}
+            </Button>
+          </div>
+        </Modal>
       )}
     </div>
   );

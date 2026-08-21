@@ -1,18 +1,34 @@
-import { useState } from 'react';
+import { useState } from "react";
 
-import { Button, Chip, ChipIcon, FormField, Input, Modal, Textarea } from '@/components/ui';
-import { MESSAGES } from '@/constants/messages';
-import { useAuth } from '@/hooks/useAuth';
-import { useToast } from '@/hooks/useToast';
-import { ApiError } from '@/lib/api/errors';
-import { formatTimestamp } from '@/lib/format/formatTimestamp';
+import {
+  Button,
+  Chip,
+  ChipIcon,
+  FormField,
+  Input,
+  Modal,
+  Textarea,
+} from "@/components/ui";
+import { MESSAGES } from "@/constants/messages";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/useToast";
+import { ApiError } from "@/lib/api/errors";
+import { formatTimestamp } from "@/lib/format/formatTimestamp";
 
-import { modelClassNames, useModelVersionsQuery } from '../api/useConfigQueries';
-import { useApproveModelVersion, useRegisterModelVersion } from '../api/useModelVersionMutations';
-import { ConfigSection } from './ConfigSection';
+import {
+  modelClassNames,
+  useModelVersionsQuery,
+} from "../api/useConfigQueries";
+import { useDeleteConfigRecord } from "../api/useDeleteConfigRecord";
+import {
+  useApproveModelVersion,
+  useRegisterModelVersion,
+} from "../api/useModelVersionMutations";
+import { ConfigSection } from "./ConfigSection";
+import { DeleteConfigDialog } from "./DeleteConfigDialog";
 
-import type { FormEvent } from 'react';
-import type { ModelVersionSummary } from '@/lib/api/types';
+import type { FormEvent } from "react";
+import type { ModelVersionSummary } from "@/lib/api/types";
 
 /** Matches ModelVersionCreate.version max_length on the API. */
 const VERSION_MAX = 40;
@@ -28,22 +44,22 @@ interface PendingRegistration {
 
 const parseClasses = (raw: string): string[] =>
   raw
-    .split(',')
+    .split(",")
     .map((part) => part.trim())
-    .filter((part) => part !== '');
+    .filter((part) => part !== "");
 
 const normalizeArtefactHash = (raw: string): string => {
   const trimmed = raw.trim();
-  if (trimmed.startsWith('sha256:')) return trimmed;
+  if (trimmed.startsWith("sha256:")) return trimmed;
   if (/^[a-fA-F0-9]{64}$/.test(trimmed)) return `sha256:${trimmed}`;
   return trimmed;
 };
 
 const hasG1Evidence = (model: ModelVersionSummary): boolean =>
   model.model_card_ref !== null &&
-  model.model_card_ref !== '' &&
+  model.model_card_ref !== "" &&
   model.datasheet_ref !== null &&
-  model.datasheet_ref !== '';
+  model.datasheet_ref !== "";
 
 const RegisterModelDialog = ({
   pending,
@@ -59,13 +75,14 @@ const RegisterModelDialog = ({
   <Modal title="Register model version" onClose={onCancel}>
     <div className="space-y-4">
       <p className="text-sm text-fg">
-        “{pending.version}” will be recorded as a detection model for this tenant, with classes{' '}
-        {pending.classes.join(', ')}. Registration is the evidence trail — it is not approval and
-        not a site deployment.
+        “{pending.version}” will be recorded as a detection model for this
+        tenant, with classes {pending.classes.join(", ")}. Registration is the
+        evidence trail — it is not approval and not a site deployment.
       </p>
       <p className="text-xs text-fg-muted">
-        The artefact hash is stored as identity. The edge agent still verifies the ONNX file against
-        its manifest before it will load. The registration is audited.
+        The artefact hash is stored as identity. The edge agent still verifies
+        the ONNX file against its manifest before it will load. The registration
+        is audited.
       </p>
       <div className="flex justify-end gap-3">
         <Button variant="ghost" onClick={onCancel} disabled={isSubmitting}>
@@ -95,12 +112,12 @@ const ApproveModelDialog = ({
   <Modal title="Approve model version" onClose={onCancel}>
     <div className="space-y-4">
       <p className="text-sm text-fg">
-        You ({actorName}) are recording gate G1 approval for “{model.version}”. The approver is
-        taken from your session — it cannot be typed.
+        You ({actorName}) are recording gate G1 approval for “{model.version}”.
+        The approver is taken from your session — it cannot be typed.
       </p>
       <p className="text-xs text-fg-muted">
-        Approval is evidence that the card and datasheet were reviewed. It does not mark the model
-        deployed at a customer site. The approval is audited.
+        Approval is evidence that the card and datasheet were reviewed. It does
+        not mark the model deployed at a customer site. The approval is audited.
       </p>
       <div className="flex justify-end gap-3">
         <Button variant="ghost" onClick={onCancel} disabled={isSubmitting}>
@@ -118,20 +135,25 @@ export const ModelsSection = () => {
   const modelsQuery = useModelVersionsQuery();
   const registerModel = useRegisterModelVersion();
   const approveModel = useApproveModelVersion();
+  const deleteModel = useDeleteConfigRecord("model-versions");
   const { principal } = useAuth();
   const { showToast } = useToast();
 
-  const [version, setVersion] = useState('');
-  const [artefactHash, setArtefactHash] = useState('');
-  const [classes, setClasses] = useState('');
-  const [modelCardRef, setModelCardRef] = useState('');
-  const [datasheetRef, setDatasheetRef] = useState('');
-  const [notes, setNotes] = useState('');
+  const [version, setVersion] = useState("");
+  const [artefactHash, setArtefactHash] = useState("");
+  const [classes, setClasses] = useState("");
+  const [modelCardRef, setModelCardRef] = useState("");
+  const [datasheetRef, setDatasheetRef] = useState("");
+  const [notes, setNotes] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingRegistration | null>(null);
-  const [approveTarget, setApproveTarget] = useState<ModelVersionSummary | null>(null);
+  const [approveTarget, setApproveTarget] =
+    useState<ModelVersionSummary | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ModelVersionSummary | null>(
+    null,
+  );
 
-  const actorName = principal?.fullName ?? 'this session';
+  const actorName = principal?.fullName ?? "this session";
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -140,16 +162,20 @@ export const ModelsSection = () => {
     const parsedClasses = parseClasses(classes);
     const trimmedCard = modelCardRef.trim();
     const trimmedDatasheet = datasheetRef.trim();
-    if (trimmedVersion === '' || hashed === '' || parsedClasses.length === 0) {
-      setFormError('Version, artefact hash and at least one class are required.');
+    if (trimmedVersion === "" || hashed === "" || parsedClasses.length === 0) {
+      setFormError(
+        "Version, artefact hash and at least one class are required.",
+      );
       return;
     }
     if (trimmedVersion.length > VERSION_MAX) {
       setFormError(`Version must be at most ${VERSION_MAX} characters.`);
       return;
     }
-    if (trimmedCard === '' || trimmedDatasheet === '') {
-      setFormError('Model card and datasheet references are required so this version can be approved.');
+    if (trimmedCard === "" || trimmedDatasheet === "") {
+      setFormError(
+        "Model card and datasheet references are required so this version can be approved.",
+      );
       return;
     }
     setFormError(null);
@@ -159,7 +185,7 @@ export const ModelsSection = () => {
       classes: parsedClasses,
       modelCardRef: trimmedCard,
       datasheetRef: trimmedDatasheet,
-      notes: notes.trim() === '' ? null : notes.trim(),
+      notes: notes.trim() === "" ? null : notes.trim(),
     });
   };
 
@@ -168,17 +194,20 @@ export const ModelsSection = () => {
     registerModel.mutate(pending, {
       onSuccess: () => {
         setPending(null);
-        setVersion('');
-        setArtefactHash('');
-        setClasses('');
-        setModelCardRef('');
-        setDatasheetRef('');
-        setNotes('');
-        showToast({ tone: 'success', message: MESSAGES.config.modelRegistered });
+        setVersion("");
+        setArtefactHash("");
+        setClasses("");
+        setModelCardRef("");
+        setDatasheetRef("");
+        setNotes("");
+        showToast({
+          tone: "success",
+          message: MESSAGES.config.modelRegistered,
+        });
       },
       onError: (error) => {
         showToast({
-          tone: 'failure',
+          tone: "failure",
           message:
             error instanceof ApiError && error.status === 409
               ? MESSAGES.config.modelRegisterConflict
@@ -193,15 +222,38 @@ export const ModelsSection = () => {
     approveModel.mutate(approveTarget.id, {
       onSuccess: () => {
         setApproveTarget(null);
-        showToast({ tone: 'success', message: MESSAGES.config.modelApproved });
+        showToast({ tone: "success", message: MESSAGES.config.modelApproved });
       },
       onError: (error) => {
         showToast({
-          tone: 'failure',
+          tone: "failure",
           message:
             error instanceof ApiError && error.status === 422
               ? MESSAGES.config.modelApproveNeedsEvidence
               : MESSAGES.config.modelApproveFailed,
+        });
+      },
+    });
+  };
+
+  const handleDelete = (): void => {
+    if (deleteTarget === null) return;
+    const version = deleteTarget.version;
+    deleteModel.mutate(deleteTarget.id, {
+      onSuccess: () => {
+        setDeleteTarget(null);
+        showToast({
+          tone: "success",
+          message: MESSAGES.config.modelDeleted(version),
+        });
+      },
+      onError: (error) => {
+        showToast({
+          tone: "failure",
+          message:
+            error instanceof ApiError && error.status === 409
+              ? MESSAGES.config.modelDeleteBlocked
+              : MESSAGES.config.modelDeleteFailed,
         });
       },
     });
@@ -281,7 +333,11 @@ export const ModelsSection = () => {
         hint="Known weak conditions, evaluation caveats — documented rather than averaged away."
         className="lg:col-span-12"
       >
-        <Textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} />
+        <Textarea
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          rows={3}
+        />
       </FormField>
       <div className="flex items-end justify-end lg:col-span-12">
         <Button type="submit" isLoading={registerModel.isPending}>
@@ -333,9 +389,14 @@ export const ModelsSection = () => {
                 const detects = modelClassNames(model.classes);
                 const evidenced = hasG1Evidence(model);
                 return (
-                  <tr key={model.id} className="transition-colors duration-120 hover:bg-surface-2">
+                  <tr
+                    key={model.id}
+                    className="transition-colors duration-120 hover:bg-surface-2"
+                  >
                     <td className="px-4 py-2">
-                      <div className="font-mono text-xs text-fg">{model.version}</div>
+                      <div className="font-mono text-xs text-fg">
+                        {model.version}
+                      </div>
                       <div
                         className="mt-0.5 max-w-[14rem] truncate font-mono text-[11px] text-fg-muted"
                         title={model.artefact_hash}
@@ -344,7 +405,7 @@ export const ModelsSection = () => {
                       </div>
                     </td>
                     <td className="px-4 py-2 text-fg-muted">
-                      {detects.length > 0 ? detects.join(', ') : '—'}
+                      {detects.length > 0 ? detects.join(", ") : "—"}
                     </td>
                     <td className="px-4 py-2">
                       {evidenced ? (
@@ -363,7 +424,7 @@ export const ModelsSection = () => {
                           <Chip variant="ok" icon={<ChipIcon glyph="check" />}>
                             Approved
                           </Chip>
-                          <p className="mt-1 tabular-nums text-xs text-fg-muted">
+                          <p className="mt-1 text-xs tabular-nums text-fg-muted">
                             {formatTimestamp(model.approved_at)}
                           </p>
                         </div>
@@ -379,16 +440,22 @@ export const ModelsSection = () => {
                           Deployed
                         </Chip>
                       ) : (
-                        <Chip variant="neutral" icon={<ChipIcon glyph="circle" />}>
+                        <Chip
+                          variant="neutral"
+                          icon={<ChipIcon glyph="circle" />}
+                        >
                           Not deployed
                         </Chip>
                       )}
                     </td>
-                    <td className="max-w-xs truncate px-4 py-2 text-fg-muted" title={model.notes ?? ''}>
-                      {model.notes ?? '—'}
+                    <td
+                      className="max-w-xs truncate px-4 py-2 text-fg-muted"
+                      title={model.notes ?? ""}
+                    >
+                      {model.notes ?? "—"}
                     </td>
                     <td className="px-4 py-2">
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-2">
                         {model.approved_at === null ? (
                           <Button
                             size="sm"
@@ -398,12 +465,19 @@ export const ModelsSection = () => {
                             title={
                               evidenced
                                 ? undefined
-                                : 'Approval needs a model card and a datasheet reference.'
+                                : "Approval needs a model card and a datasheet reference."
                             }
                           >
                             Approve
                           </Button>
                         ) : null}
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => setDeleteTarget(model)}
+                        >
+                          Delete
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -428,6 +502,16 @@ export const ModelsSection = () => {
           isSubmitting={approveModel.isPending}
           onConfirm={handleConfirmApprove}
           onCancel={() => setApproveTarget(null)}
+        />
+      ) : null}
+      {deleteTarget !== null ? (
+        <DeleteConfigDialog
+          title="Delete detection model"
+          name={deleteTarget.version}
+          detail="Model versions used by monitoring records cannot be deleted because event evidence must remain reproducible."
+          isSubmitting={deleteModel.isPending}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
         />
       ) : null}
     </>

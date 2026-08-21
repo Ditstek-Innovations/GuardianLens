@@ -56,13 +56,6 @@ def _ip(request: Request) -> str | None:
 
 
 _FULL_FRAME = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
-_AUTH_REQUIRED_RESOLUTION = "Unknown (Auth Required)"
-
-
-def _candidate_needs_login(candidate: dict) -> bool:
-    return (candidate.get("resolution") or "") == _AUTH_REQUIRED_RESOLUTION
-
-
 def _adopt_candidate(
     *,
     candidate: dict,
@@ -335,10 +328,11 @@ async def import_pending_candidates(
     principal: HumanPrincipal = Depends(require_site_admin),
     context: TenantContext = Depends(get_tenant_context),
 ) -> CameraDiscoveryBulkImportResponse:
-    """Register every scanned camera that answers without a camera login.
+    """Register every pending scanned camera.
 
-    Candidates the probe marked as 401/auth-required are skipped — this
-    product does not store camera passwords from discovery.
+    An auth-required camera is registered with its anonymous RTSP endpoint.
+    It remains unavailable until an administrator adds the full credential
+    later through Configuration → Cameras → Replace credential.
     """
     repo = CameraDiscoveryRepository(context.session)
     pending = [
@@ -346,13 +340,9 @@ async def import_pending_candidates(
         for row in repo.get_candidates(site_id)
         if row.get("imported_at") is None and row.get("status") != "imported"
     ]
-    skipped_auth = 0
     imported = 0
     already = 0
     for candidate in pending:
-        if _candidate_needs_login(candidate):
-            skipped_auth += 1
-            continue
         name = f"{candidate.get('model') or 'Camera'} - {candidate['ip_address']}"
         _adopt_candidate(
             candidate=candidate,
@@ -368,7 +358,7 @@ async def import_pending_candidates(
         imported += 1
     return CameraDiscoveryBulkImportResponse(
         imported_count=imported,
-        skipped_auth_required=skipped_auth,
+        skipped_auth_required=0,
         skipped_already_imported=already,
     )
 

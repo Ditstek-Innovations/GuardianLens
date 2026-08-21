@@ -266,7 +266,7 @@ class CameraDiscoveryImportRequest(BaseModel):
 
 
 class CameraDiscoveryBulkImportResponse(BaseModel):
-    """Scan → register, no camera login: how many open streams were adopted."""
+    """Scan → register summary, including cameras whose login is pending."""
 
     imported_count: int
     skipped_auth_required: int

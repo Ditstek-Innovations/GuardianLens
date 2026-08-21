@@ -10,13 +10,31 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
-import subprocess
+import os
+import shutil
 from dataclasses import dataclass
-from datetime import datetime
+from pathlib import Path
 from typing import Optional
-from uuid import uuid4
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_ffprobe() -> str:
+    """Resolve system, configured, or repository-bundled ffprobe."""
+    configured = os.environ.get("GL_FFPROBE_PATH") or os.environ.get(
+        "GL_FFPROBE_BIN"
+    )
+    candidates = [
+        configured,
+        shutil.which("ffprobe"),
+        str(Path(__file__).resolve().parents[3] / "var/ffmpeg/usr/bin/ffprobe"),
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    raise FileNotFoundError(
+        "ffprobe was not found; install ffmpeg or set GL_FFPROBE_PATH"
+    )
 
 
 @dataclass
@@ -99,6 +117,7 @@ class RTSPProbeService:
 
     def __init__(self):
         self.logger = logger
+        self._ffprobe = resolve_ffprobe()
 
     async def scan_subnet(
         self, subnet: str, timeout_per_host: int = 2
@@ -128,10 +147,10 @@ class RTSPProbeService:
         # Scan in chunks to avoid opening too many sockets at once
         chunk_size = 50
         for i in range(0, len(hosts), chunk_size):
-            chunk = hosts[i:i + chunk_size]
+            chunk = hosts[i : i + chunk_size]
             tasks = [self._probe_host(str(host)) for host in chunk]
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             for result in results:
                 if isinstance(result, list):
                     discovered.extend(result)
@@ -146,9 +165,7 @@ class RTSPProbeService:
 
         Tries common ports and paths in parallel, returns verified cameras.
         """
-        tasks = [
-            self._probe_port(ip, port) for port in self.DEFAULT_PORTS
-        ]
+        tasks = [self._probe_port(ip, port) for port in self.DEFAULT_PORTS]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         discovered = []
@@ -180,8 +197,6 @@ class RTSPProbeService:
         # Fast fail if port is closed
         if not await self._is_port_open(ip, port):
             return discovered
-
-
         auth_required_camera = None
 
         for path in self.DEFAULT_RTSP_PATHS:
@@ -203,7 +218,7 @@ class RTSPProbeService:
                             resolution=info.get("resolution"),
                             codec=info.get("codec"),
                         )
-                        
+
                         if info.get("resolution") == "Unknown (Auth Required)":
                             if not auth_required_camera:
                                 auth_required_camera = camera
@@ -223,7 +238,12 @@ class RTSPProbeService:
 
         if not discovered and auth_required_camera:
             discovered.append(auth_required_camera)
-            self.logger.debug(f"Found auth-required camera at rtsp://{ip}:{port}/{auth_required_camera.rtsp_path}")
+            self.logger.debug(
+                "Found auth-required camera at rtsp://%s:%s/%s",
+                ip,
+                port,
+                auth_required_camera.rtsp_path,
+            )
 
         return discovered
 
@@ -236,12 +256,16 @@ class RTSPProbeService:
         try:
             # ffprobe with short timeout for quick verification
             cmd = [
-                "ffprobe",
-                "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=width,height,codec_name",
-                "-of", "json",
-                f"{rtsp_url}",
+                self._ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height,codec_name",
+                "-of",
+                "json",
+                rtsp_url,
             ]
 
             process = await asyncio.create_subprocess_exec(
@@ -290,7 +314,10 @@ class RTSPProbeService:
                 return None
 
         except FileNotFoundError:
-            self.logger.error("CRITICAL: 'ffprobe' command not found! Camera discovery requires ffmpeg to be installed on the system.")
+            self.logger.error(
+                "CRITICAL: ffprobe was not found. Camera discovery requires "
+                "ffmpeg or GL_FFPROBE_PATH/GL_FFPROBE_BIN."
+            )
             return None
         except Exception as e:
             self.logger.debug(f"ffprobe error for {rtsp_url}: {e}")
@@ -304,6 +331,4 @@ class RTSPProbeService:
         Useful for manual verification or testing a specific endpoint.
         """
         cameras = await self._probe_port(ip, port)
-        return next(
-            (c for c in cameras if c.rtsp_path == rtsp_path), None
-        )
+        return next((c for c in cameras if c.rtsp_path == rtsp_path), None)

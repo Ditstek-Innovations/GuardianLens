@@ -1,16 +1,24 @@
-import { useState } from 'react';
+import { useState } from "react";
 
-import { Button, FormField, Input, Modal, Select } from '@/components/ui';
-import { MESSAGES } from '@/constants/messages';
-import { ROLE } from '@/constants/roles';
-import { useAuth } from '@/hooks/useAuth';
-import { useToast } from '@/hooks/useToast';
+import { Button, FormField, Input, Modal, Select } from "@/components/ui";
+import { MESSAGES } from "@/constants/messages";
+import { ROLE } from "@/constants/roles";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/useToast";
+import { ApiError } from "@/lib/api/errors";
 
-import { useCamerasQuery, useSitesQuery, useZonesQuery } from '../api/useConfigQueries';
-import { useCreateZone } from '../api/useCreateZone';
-import { ConfigSection } from './ConfigSection';
+import {
+  useCamerasQuery,
+  useSitesQuery,
+  useZonesQuery,
+} from "../api/useConfigQueries";
+import { useCreateZone } from "../api/useCreateZone";
+import { useDeleteConfigRecord } from "../api/useDeleteConfigRecord";
+import { ConfigSection } from "./ConfigSection";
+import { DeleteConfigDialog } from "./DeleteConfigDialog";
 
-import type { FormEvent } from 'react';
+import type { FormEvent } from "react";
+import type { ZoneSummary } from "@/lib/api/types";
 
 /**
  * SCR-8 `[MVP]` minimal — the zone is the camera's full frame. Drawing a
@@ -46,12 +54,12 @@ const CreateZoneDialog = ({
   <Modal title="Create zone" onClose={onCancel}>
     <div className="space-y-4">
       <p className="text-sm text-fg">
-        “{pending.name}” will cover the full frame of camera {pending.cameraName}. Detection rules
-        can then be attached to it.
+        “{pending.name}” will cover the full frame of camera{" "}
+        {pending.cameraName}. Detection rules can then be attached to it.
       </p>
       <p className="text-xs text-fg-muted">
-        Nothing in this zone is monitored until a rule is explicitly activated (BR-001). The change
-        is audited and reaches the edge on its next sync.
+        Nothing in this zone is monitored until a rule is explicitly activated
+        (BR-001). The change is audited and reaches the edge on its next sync.
       </p>
       <div className="flex justify-end gap-3">
         <Button variant="ghost" onClick={onCancel} disabled={isSubmitting}>
@@ -71,15 +79,18 @@ export const ZonesSection = () => {
   // Cameras and sites are site_admin-scoped (TRD §10.6); the create form is
   // therefore admin-only, and the camera-name column falls back to the raw
   // id for the roles that cannot enumerate cameras.
-  const isSiteAdmin = principal !== null && principal.roles.includes(ROLE.SITE_ADMIN);
+  const isSiteAdmin =
+    principal !== null && principal.roles.includes(ROLE.SITE_ADMIN);
   const camerasQuery = useCamerasQuery(isSiteAdmin);
   const sitesQuery = useSitesQuery(isSiteAdmin);
   const createZone = useCreateZone();
+  const deleteZone = useDeleteConfigRecord("zones");
   const { showToast } = useToast();
-  const [name, setName] = useState('');
-  const [cameraId, setCameraId] = useState('');
+  const [name, setName] = useState("");
+  const [cameraId, setCameraId] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingZone | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ZoneSummary | null>(null);
 
   const cameras = camerasQuery.data ?? [];
   const siteName = (siteId: string): string | null =>
@@ -88,36 +99,72 @@ export const ZonesSection = () => {
     const site = siteName(camera.site_id);
     return site !== null ? `${camera.name} — ${site}` : camera.name;
   };
-  const effectiveCameraId = cameraId !== '' ? cameraId : (cameras[0]?.id ?? '');
+  const effectiveCameraId = cameraId !== "" ? cameraId : (cameras[0]?.id ?? "");
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const trimmed = name.trim();
-    const camera = cameras.find((candidate) => candidate.id === effectiveCameraId);
-    if (trimmed === '' || camera === undefined) {
-      setFormError('Name and camera are required.');
+    const camera = cameras.find(
+      (candidate) => candidate.id === effectiveCameraId,
+    );
+    if (trimmed === "" || camera === undefined) {
+      setFormError("Name and camera are required.");
       return;
     }
     setFormError(null);
-    setPending({ cameraId: camera.id, cameraName: cameraLabel(camera), name: trimmed });
+    setPending({
+      cameraId: camera.id,
+      cameraName: cameraLabel(camera),
+      name: trimmed,
+    });
   };
 
   const handleConfirm = (): void => {
     if (pending === null) return;
     createZone.mutate(
-      { cameraId: pending.cameraId, name: pending.name, polygon: FULL_FRAME_POLYGON },
+      {
+        cameraId: pending.cameraId,
+        name: pending.name,
+        polygon: FULL_FRAME_POLYGON,
+      },
       {
         onSuccess: () => {
           setPending(null);
-          setName('');
-          showToast({ tone: 'success', message: MESSAGES.config.zoneSaved });
+          setName("");
+          showToast({ tone: "success", message: MESSAGES.config.zoneSaved });
         },
         onError: () => {
           // The dialog stays open for retry (CS-MSG-05); nothing was stored.
-          showToast({ tone: 'failure', message: MESSAGES.config.zoneSaveFailed });
+          showToast({
+            tone: "failure",
+            message: MESSAGES.config.zoneSaveFailed,
+          });
         },
       },
     );
+  };
+
+  const handleDelete = (): void => {
+    if (deleteTarget === null) return;
+    const name = deleteTarget.name;
+    deleteZone.mutate(deleteTarget.id, {
+      onSuccess: () => {
+        setDeleteTarget(null);
+        showToast({
+          tone: "success",
+          message: MESSAGES.config.zoneDeleted(name),
+        });
+      },
+      onError: (error) => {
+        showToast({
+          tone: "failure",
+          message:
+            error instanceof ApiError && error.status === 409
+              ? MESSAGES.config.zoneDeleteBlocked
+              : MESSAGES.config.zoneDeleteFailed,
+        });
+      },
+    });
   };
 
   const form = isSiteAdmin ? (
@@ -127,7 +174,12 @@ export const ZonesSection = () => {
       aria-label="Create zone"
       className="grid gap-4 lg:grid-cols-12"
     >
-      <FormField label="Name" required error={formError ?? undefined} className="lg:col-span-4">
+      <FormField
+        label="Name"
+        required
+        error={formError ?? undefined}
+        className="lg:col-span-4"
+      >
         <Input value={name} onChange={(event) => setName(event.target.value)} />
       </FormField>
       <FormField
@@ -136,7 +188,10 @@ export const ZonesSection = () => {
         hint="The zone covers the camera's full frame at MVP."
         className="lg:col-span-5"
       >
-        <Select value={effectiveCameraId} onChange={(event) => setCameraId(event.target.value)}>
+        <Select
+          value={effectiveCameraId}
+          onChange={(event) => setCameraId(event.target.value)}
+        >
           {cameras.map((camera) => (
             <option key={camera.id} value={camera.id}>
               {cameraLabel(camera)}
@@ -159,24 +214,49 @@ export const ZonesSection = () => {
         description="Regions within a camera's view that detection rules apply to."
         query={zonesQuery}
         emptyDetail="No zones are defined."
-        {...(form !== undefined ? { actions: form, actionLabel: 'Add zone' } : {})}
+        {...(form !== undefined
+          ? { actions: form, actionLabel: "Add zone" }
+          : {})}
       >
         {(zones) => (
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-fg-muted">
-                <th scope="col" className="h-10 px-4">Name</th>
-                <th scope="col" className="h-10 px-4">Camera</th>
+                <th scope="col" className="h-10 px-4">
+                  Name
+                </th>
+                <th scope="col" className="h-10 px-4">
+                  Camera
+                </th>
+                <th scope="col" className="h-10 px-4">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {zones.map((zone) => {
-                const camera = cameras.find((candidate) => candidate.id === zone.camera_id);
+                const camera = cameras.find(
+                  (candidate) => candidate.id === zone.camera_id,
+                );
                 return (
-                  <tr key={zone.id} className="h-10 transition-colors duration-120 hover:bg-surface-2">
+                  <tr
+                    key={zone.id}
+                    className="h-10 transition-colors duration-120 hover:bg-surface-2"
+                  >
                     <td className="px-4 py-2 text-fg">{zone.name}</td>
                     <td className="px-4 py-2 text-fg-muted">
-                      {camera !== undefined ? cameraLabel(camera) : zone.camera_id}
+                      {camera !== undefined
+                        ? cameraLabel(camera)
+                        : zone.camera_id}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => setDeleteTarget(zone)}
+                      >
+                        Delete
+                      </Button>
                     </td>
                   </tr>
                 );
@@ -191,6 +271,16 @@ export const ZonesSection = () => {
           isSubmitting={createZone.isPending}
           onConfirm={handleConfirm}
           onCancel={() => setPending(null)}
+        />
+      ) : null}
+      {deleteTarget !== null ? (
+        <DeleteConfigDialog
+          title="Delete zone"
+          name={deleteTarget.name}
+          detail="Delete the zone’s detection rules first. Zones referenced by monitoring records are retained."
+          isSubmitting={deleteZone.isPending}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
         />
       ) : null}
     </>

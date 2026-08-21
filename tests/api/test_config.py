@@ -94,6 +94,53 @@ def test_camera_audit_entry_never_contains_credential(
         assert "stream_url_encrypted" not in state
 
 
+def test_new_camera_can_be_deleted_with_audit(
+    client, api_seed, admin_token, tenant_conn
+):
+    created = _create_camera(client, api_seed, admin_token)
+    assert created.status_code == 201
+    camera_id = created.json()["id"]
+
+    deleted = client.delete(
+        f"/api/v1/cameras/{camera_id}", headers=bearer(admin_token)
+    )
+
+    assert deleted.status_code == 204
+    assert tenant_conn.execute(
+        "SELECT 1 FROM cameras WHERE id = %s", (camera_id,)
+    ).fetchone() is None
+    actions = tenant_conn.execute(
+        "SELECT action FROM audit_log WHERE entity_type = 'camera' "
+        "AND entity_id = %s ORDER BY id",
+        (camera_id,),
+    ).fetchall()
+    assert [row[0] for row in actions] == ["camera.created", "camera.deleted"]
+
+
+def test_camera_with_monitoring_history_cannot_be_deleted(
+    client, api_seed, admin_token, tenant_conn
+):
+    camera_id = api_seed["camera_a"]
+
+    response = client.delete(
+        f"/api/v1/cameras/{camera_id}", headers=bearer(admin_token)
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "GL-4093"
+    assert tenant_conn.execute(
+        "SELECT 1 FROM cameras WHERE id = %s", (camera_id,)
+    ).fetchone() is not None
+
+
+def test_reviewer_cannot_delete_camera(client, api_seed, reviewer_token):
+    response = client.delete(
+        f"/api/v1/cameras/{api_seed['camera_a']}",
+        headers=bearer(reviewer_token),
+    )
+    assert response.status_code == 403
+
+
 @pytest.mark.active_rule("BR-001")
 def test_rule_is_created_inactive(client, api_seed, manager_token):
     response = client.post(
@@ -252,6 +299,97 @@ def test_zone_crud_with_audit(client, api_seed, manager_token, tenant_conn):
         ).fetchall()
     ]
     assert actions == ["zone.created", "zone.updated", "zone.deleted"]
+
+
+def test_zone_with_rule_cannot_be_deleted(client, api_seed, manager_token):
+    response = client.delete(
+        f"/api/v1/zones/{api_seed['zone_a']}", headers=bearer(manager_token)
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "GL-4093"
+
+
+def test_rule_can_be_deleted_with_audit(
+    client, api_seed, manager_token, tenant_conn
+):
+    created = client.post(
+        "/api/v1/rules",
+        json={
+            "zone_id": str(api_seed["zone_a"]),
+            "rule_type": "zone_entry",
+            "confidence_threshold": 0.5,
+            "debounce_seconds": 10,
+            "human_readable": "Temporary entry rule",
+            "detection_class": "person",
+        },
+        headers=bearer(manager_token),
+    )
+    assert created.status_code == 201, created.text
+    rule_id = created.json()["id"]
+
+    deleted = client.delete(
+        f"/api/v1/rules/{rule_id}", headers=bearer(manager_token)
+    )
+
+    assert deleted.status_code == 204
+    assert tenant_conn.execute(
+        "SELECT 1 FROM detection_rules WHERE id = %s", (rule_id,)
+    ).fetchone() is None
+    assert tenant_conn.execute(
+        "SELECT 1 FROM audit_log WHERE entity_type = 'rule' "
+        "AND entity_id = %s AND action = 'rule.deleted'",
+        (rule_id,),
+    ).fetchone() is not None
+
+
+def test_unreferenced_agent_can_be_deleted(
+    client, api_seed, admin_token, tenant_conn
+):
+    created = client.post(
+        "/api/v1/agents",
+        json={"site_id": str(api_seed["site_a"]), "name": "temporary edge"},
+        headers=bearer(admin_token),
+    )
+    assert created.status_code == 201, created.text
+    agent_id = created.json()["id"]
+
+    deleted = client.delete(
+        f"/api/v1/agents/{agent_id}", headers=bearer(admin_token)
+    )
+
+    assert deleted.status_code == 204
+    assert tenant_conn.execute(
+        "SELECT 1 FROM agents WHERE id = %s", (agent_id,)
+    ).fetchone() is None
+
+
+def test_unreferenced_model_version_can_be_deleted(
+    client, admin_token, tenant_conn
+):
+    version = f"delete-me-{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        "/api/v1/model-versions",
+        json={
+            "version": version,
+            "artefact_hash": "sha256:delete-test",
+            "classes": ["person"],
+            "model_card_ref": "test-card",
+            "datasheet_ref": "test-datasheet",
+        },
+        headers=bearer(admin_token),
+    )
+    assert created.status_code == 201, created.text
+    model_id = created.json()["id"]
+
+    deleted = client.delete(
+        f"/api/v1/model-versions/{model_id}", headers=bearer(admin_token)
+    )
+
+    assert deleted.status_code == 204
+    assert tenant_conn.execute(
+        "SELECT 1 FROM model_versions WHERE id = %s", (model_id,)
+    ).fetchone() is None
 
 
 def test_agent_config_pull_and_304(client, api_seed, agent_token, manager_token):

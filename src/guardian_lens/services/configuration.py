@@ -31,6 +31,7 @@ from argon2 import PasswordHasher
 from guardian_lens.core.errors import (
     DuplicateResourceError,
     NotFoundError,
+    ResourceInUseError,
     ScopeError,
     ValidationFailureError,
 )
@@ -212,6 +213,39 @@ class ConfigurationService:
         self._session.commit()
         return camera  # type: ignore[return-value]
 
+    def delete_camera(
+        self,
+        principal: HumanPrincipal,
+        camera_id: UUID,
+        ip_address: str | None,
+    ) -> None:
+        before = self._config.get_camera(camera_id)
+        if before is None:
+            raise NotFoundError("camera not found")
+        self._ensure_site_scope(principal, before.site_id)
+        if self._config.camera_has_references(camera_id):
+            raise ResourceInUseError(
+                "Camera has zones or monitoring records and cannot be deleted. "
+                "Disable it to stop monitoring while preserving history."
+            )
+
+        if not self._config.delete_camera(camera_id):
+            raise NotFoundError("camera not found")
+        self._audit.write(
+            action="camera.deleted",
+            entity_type="camera",
+            actor_user_id=principal.user_id,
+            entity_id=camera_id,
+            before_state={
+                "site_id": str(before.site_id),
+                "name": before.name,
+                "stream_profile": before.stream_profile,
+            },
+            ip_address=ip_address,
+        )
+        self._config.bump_config_version(before.site_id)
+        self._session.commit()
+
     # -- zones ---------------------------------------------------------------
 
     def create_zone(
@@ -287,7 +321,13 @@ class ConfigurationService:
             raise NotFoundError(_ZONE_NOT_FOUND)
         self._ensure_site_scope(principal, site_id)
         before = self._config.get_zone(zone_id)
-        self._config.delete_zone(zone_id)
+        if self._config.zone_has_references(zone_id):
+            raise ResourceInUseError(
+                "Zone has detection rules or monitoring records and cannot be "
+                "deleted. Delete its rules first; monitoring history is retained."
+            )
+        if not self._config.delete_zone(zone_id):
+            raise NotFoundError(_ZONE_NOT_FOUND)
         self._audit.write(
             action="zone.deleted",
             entity_type="zone",
@@ -476,6 +516,32 @@ class ConfigurationService:
         self._session.commit()
         return rule  # type: ignore[return-value]
 
+    def delete_rule(
+        self, principal: HumanPrincipal, rule_id: UUID, ip_address: str | None
+    ) -> None:
+        site_id = self._config.rule_site(rule_id)
+        if site_id is None:
+            raise NotFoundError(_RULE_NOT_FOUND)
+        self._ensure_site_scope(principal, site_id)
+        before = self._config.get_rule(rule_id)
+        if not self._config.delete_rule(rule_id):
+            raise NotFoundError(_RULE_NOT_FOUND)
+        self._audit.write(
+            action="rule.deleted",
+            entity_type="rule",
+            actor_user_id=principal.user_id,
+            entity_id=rule_id,
+            before_state={
+                "zone_id": str(before.zone_id),  # type: ignore[union-attr]
+                "rule_type": before.rule_type,  # type: ignore[union-attr]
+                "human_readable": before.human_readable,  # type: ignore[union-attr]
+                "is_active": before.is_active,  # type: ignore[union-attr]
+            },
+            ip_address=ip_address,
+        )
+        self._config.bump_config_version(site_id)
+        self._session.commit()
+
     # -- edge agents (WORKFLOW.md 7 gap 1) -----------------------------------
 
     def register_agent(
@@ -522,6 +588,35 @@ class ConfigurationService:
 
     def list_agents(self, principal: HumanPrincipal) -> list[sa.Row]:
         return list(self._config.list_agents(sorted(principal.site_ids())))
+
+    def delete_agent(
+        self, principal: HumanPrincipal, agent_id: UUID, ip_address: str | None
+    ) -> None:
+        before = self._config.get_agent(agent_id)
+        if before is None:
+            raise NotFoundError("agent not found")
+        self._ensure_site_scope(principal, before.site_id)
+        if self._config.agent_has_references(agent_id):
+            raise ResourceInUseError(
+                "Agent has monitoring records and cannot be deleted because "
+                "their provenance must be preserved."
+            )
+        if not self._config.delete_agent(agent_id):
+            raise NotFoundError("agent not found")
+        self._audit.write(
+            action="agent.deleted",
+            entity_type="agent",
+            actor_user_id=principal.user_id,
+            entity_id=agent_id,
+            before_state={
+                "site_id": str(before.site_id),
+                "name": before.name,
+                "status": before.status,
+            },
+            ip_address=ip_address,
+        )
+        self._config.bump_config_version(before.site_id)
+        self._session.commit()
 
     # -- model versions (gate G1 evidence trail) -----------------------------
 
@@ -622,6 +717,40 @@ class ConfigurationService:
         )
         self._session.commit()
         return row  # type: ignore[return-value]
+
+    def delete_model_version(
+        self,
+        principal: HumanPrincipal,
+        model_version_id: UUID,
+        ip_address: str | None,
+    ) -> None:
+        before = self._config.get_model_version(model_version_id)
+        if before is None:
+            raise NotFoundError("model version not found")
+        if self._config.model_version_has_references(model_version_id):
+            raise ResourceInUseError(
+                "Model version has monitoring records and cannot be deleted "
+                "because their evidence provenance must be preserved."
+            )
+        if not self._config.delete_model_version(model_version_id):
+            raise NotFoundError("model version not found")
+        self._audit.write(
+            action="model.deleted",
+            entity_type="model_version",
+            actor_user_id=principal.user_id,
+            entity_id=model_version_id,
+            before_state={
+                "version": before.version,
+                "artefact_hash": before.artefact_hash,
+                "approved_at": (
+                    before.approved_at.isoformat()
+                    if before.approved_at is not None
+                    else None
+                ),
+            },
+            ip_address=ip_address,
+        )
+        self._session.commit()
 
     # -- agent config pull (IF-X1) -------------------------------------------
 

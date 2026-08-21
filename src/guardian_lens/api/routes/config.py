@@ -146,6 +146,19 @@ def patch_camera(
     return CameraResponse.model_validate(row._mapping)
 
 
+@router.delete("/cameras/{camera_id}", status_code=204)
+def delete_camera(
+    camera_id: UUID,
+    request: Request,
+    principal: HumanPrincipal = Depends(require_site_admin),
+    context: TenantContext = Depends(get_tenant_context),
+) -> Response:
+    _service(request, context).delete_camera(
+        principal, camera_id, _ip(request)
+    )
+    return Response(status_code=204)
+
+
 # -- zones -------------------------------------------------------------------
 
 
@@ -270,6 +283,17 @@ def activate_rule(
     return RuleResponse.model_validate(row._mapping)
 
 
+@router.delete("/rules/{rule_id}", status_code=204)
+def delete_rule(
+    rule_id: UUID,
+    request: Request,
+    principal: HumanPrincipal = Depends(require_config_role),
+    context: TenantContext = Depends(get_tenant_context),
+) -> Response:
+    _service(request, context).delete_rule(principal, rule_id, _ip(request))
+    return Response(status_code=204)
+
+
 # -- edge agent principals (WORKFLOW.md 7 gap 1) -----------------------------
 
 
@@ -300,6 +324,17 @@ def register_agent(
     return AgentRegisteredResponse.model_validate(
         {**row._mapping, "credential": credential}
     )
+
+
+@router.delete("/agents/{agent_id}", status_code=204)
+def delete_agent(
+    agent_id: UUID,
+    request: Request,
+    principal: HumanPrincipal = Depends(require_site_admin),
+    context: TenantContext = Depends(get_tenant_context),
+) -> Response:
+    _service(request, context).delete_agent(principal, agent_id, _ip(request))
+    return Response(status_code=204)
 
 
 # -- model versions (gate G1 evidence trail) ---------------------------------
@@ -354,6 +389,19 @@ def approve_model_version(
         principal, model_version_id, _ip(request)
     )
     return ModelVersionResponse.model_validate(row._mapping)
+
+
+@router.delete("/model-versions/{model_version_id}", status_code=204)
+def delete_model_version(
+    model_version_id: UUID,
+    request: Request,
+    principal: HumanPrincipal = Depends(require_site_admin),
+    context: TenantContext = Depends(get_tenant_context),
+) -> Response:
+    _service(request, context).delete_model_version(
+        principal, model_version_id, _ip(request)
+    )
+    return Response(status_code=204)
 
 
 # -- agent config pull -------------------------------------------------------
